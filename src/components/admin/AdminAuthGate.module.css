@@ -1,0 +1,33 @@
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(10, 12, 18, 0.55);
+  backdrop-filter: blur(4px);
+}
+.modal {
+  display: grid;
+  gap: 12px;
+  width: min(400px, 100%);
+  padding: 28px;
+}
+.modal h2 {
+  font-size: 19px;
+}
+.icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.error {
+  color: var(--danger);
+  font-size: 13px;
+  font-weight: 500;
+}

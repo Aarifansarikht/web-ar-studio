@@ -1,0 +1,54 @@
+.stack {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 1000;
+  display: grid;
+  gap: 10px;
+  max-width: min(420px, calc(100vw - 40px));
+}
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 12px 12px 14px;
+  border-radius: 12px;
+  background: #11131a;
+  color: #fff;
+  box-shadow: var(--shadow-lg);
+  font-weight: 500;
+  animation: enter 0.22s ease-out;
+}
+.success svg:first-child {
+  color: #3ddc97;
+}
+.error svg:first-child {
+  color: #ff7a7a;
+}
+.info svg:first-child {
+  color: #8fb0ff;
+}
+.toast span {
+  flex: 1;
+}
+.close {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.6);
+  cursor: pointer;
+}
+.close:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+}
+@keyframes enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}

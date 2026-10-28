@@ -1,0 +1,57 @@
+.panel {
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+}
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.head h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+}
+.qrWrap {
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px dashed var(--border-strong);
+}
+.qrWrap svg {
+  width: 100%;
+  max-width: 208px;
+  height: auto;
+}
+.exportCanvas {
+  display: none !important;
+}
+.urlRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 4px 4px 12px;
+  border-radius: 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+}
+.url {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12.5px;
+  color: var(--text-2);
+}
+.actions {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}

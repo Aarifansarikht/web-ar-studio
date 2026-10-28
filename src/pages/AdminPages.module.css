@@ -1,0 +1,128 @@
+.page {
+  display: grid;
+  gap: 24px;
+  max-width: 1360px;
+  margin: 0 auto;
+}
+.narrow {
+  max-width: 980px;
+}
+.header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.header h1 {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+.sub {
+  margin-top: 6px;
+  color: var(--muted);
+}
+.sub code {
+  font-size: 12.5px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: var(--surface-3);
+  color: var(--text-2);
+}
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  text-decoration: none;
+}
+.back:hover {
+  color: var(--text);
+}
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.banner {
+  margin-top: -4px;
+}
+.stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.stat {
+  display: grid;
+  gap: 4px;
+  padding: 18px 20px;
+}
+.stat span {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.stat strong {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+}
+.skeletonCard {
+  overflow: hidden;
+}
+.manageGrid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 24px;
+  align-items: start;
+}
+.manageAside {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 16px;
+}
+.sideCard {
+  display: grid;
+  gap: 10px;
+  padding: 20px;
+}
+.sideCard h2 {
+  font-size: 15px;
+  font-weight: 700;
+}
+.sideCard button {
+  justify-self: start;
+}
+
+@media (max-width: 1180px) {
+  .manageGrid {
+    grid-template-columns: 1fr;
+  }
+  .manageAside {
+    position: static;
+    order: -1;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    align-items: start;
+  }
+}
+@media (max-width: 640px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+  .header h1 {
+    font-size: 24px;
+  }
+}
