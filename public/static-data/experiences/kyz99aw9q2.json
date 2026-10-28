@@ -1,0 +1,60 @@
+{
+  "id": "kyz99aw9q2",
+  "name": "The Great Wave — 3D Fox",
+  "description": "An animated 3D fox appears on Hokusai’s Great Wave. Print: Katsushika Hokusai, c. 1831 — public domain. Fox model: PixelMannen (CC0), rigging & animation: tomkranis (CC BY 4.0), glTF: AsoboStudio & scurest (CC BY 4.0), via Khronos glTF-Sample-Assets.",
+  "status": "published",
+  "brand": {
+    "name": "Bay81 Gallery",
+    "accentColor": "#c8102e",
+    "logoUrl": null
+  },
+  "content": {
+    "type": "model",
+    "url": "/uploads/kyz99aw9q2/content-cd57e0a8c6.glb",
+    "fileName": "Fox.glb",
+    "fit": "target",
+    "loop": true,
+    "startMuted": true,
+    "playAnimations": true,
+    "aspect": 1
+  },
+  "placement": {
+    "scale": 0.4,
+    "offsetX": -0.15,
+    "offsetY": -0.17,
+    "offsetZ": 0.12,
+    "rotationX": 0,
+    "rotationY": 90,
+    "rotationZ": 0
+  },
+  "hotspots": [
+    {
+      "id": "wave",
+      "label": "The great wave",
+      "x": 0.33,
+      "y": 0.22
+    },
+    {
+      "id": "fuji",
+      "label": "Mount Fuji",
+      "x": 0.64,
+      "y": 0.69
+    },
+    {
+      "id": "boats",
+      "label": "Fishing boats",
+      "x": 0.2,
+      "y": 0.66
+    }
+  ],
+  "target": {
+    "imageUrl": "/uploads/kyz99aw9q2/target-13d0a3b413.jpg",
+    "mindUrl": "/uploads/kyz99aw9q2/target-159350a7c8.mind",
+    "width": 1024,
+    "height": 689,
+    "quality": "good",
+    "featureCount": 2998
+  },
+  "createdAt": "2026-10-28T12:03:33.278Z",
+  "updatedAt": "2026-10-28T12:07:45.320Z"
+}

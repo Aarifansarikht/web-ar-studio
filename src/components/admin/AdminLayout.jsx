@@ -10,6 +10,7 @@ const AUTH_LABEL = {
   token: 'online · token auth',
   open: 'online · open (dev)',
   unconfigured: 'online · token not set',
+  static: 'static hosting · read-only',
 };
 
 export default function AdminLayout() {

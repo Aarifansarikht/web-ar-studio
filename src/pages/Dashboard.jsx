@@ -4,6 +4,8 @@ import Icon from '../components/common/Icon.jsx';
 import StateView from '../components/common/StateView.jsx';
 import ExperienceCard from '../components/admin/ExperienceCard.jsx';
 import { AUTH_UPDATED_EVENT } from '../components/admin/AdminAuthGate.jsx';
+import ReadOnlyNotice from '../components/admin/ReadOnlyNotice.jsx';
+import { useDataSource } from '../hooks/useDataSource.js';
 import { listExperiences } from '../services/experienceService.js';
 import { classifyUrl, getPublicBaseUrl } from '../utils/url.js';
 import styles from './AdminPages.module.css';
@@ -11,6 +13,7 @@ import styles from './AdminPages.module.css';
 export default function Dashboard() {
   const [state, setState] = useState({ loading: true, error: null, items: [] });
   const urlInfo = classifyUrl(getPublicBaseUrl());
+  const source = useDataSource();
 
   const load = useCallback(() => {
     setState((s) => ({ ...s, loading: true, error: null }));
@@ -35,10 +38,14 @@ export default function Dashboard() {
           <h1>Experiences</h1>
           <p className={styles.sub}>Create image-tracked AR experiences and share them with a QR code.</p>
         </div>
-        <Link to="/admin/experiences/new" className="btn btn-primary">
-          <Icon name="plus" /> New experience
-        </Link>
+        {source === 'api' && (
+          <Link to="/admin/experiences/new" className="btn btn-primary">
+            <Icon name="plus" /> New experience
+          </Link>
+        )}
       </header>
+
+      {source === 'static' && <ReadOnlyNotice />}
 
       {urlInfo.kind !== 'production' && (
         <div className={`alert ${urlInfo.kind === 'lan' ? 'alert-warning' : 'alert-danger'} ${styles.banner}`}>

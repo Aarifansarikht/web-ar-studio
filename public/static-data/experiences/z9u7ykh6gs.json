@@ -1,0 +1,60 @@
+{
+  "id": "z9u7ykh6gs",
+  "name": "Girl with a Pearl Earring — Explore Vermeer",
+  "description": "Discover the details of Vermeer’s masterpiece, with his View of Delft floating beside her. Paintings: Johannes Vermeer, c. 1660–1665 — public domain (Wikimedia Commons).",
+  "status": "published",
+  "brand": {
+    "name": "Bay81 Gallery",
+    "accentColor": "#2e6fd8",
+    "logoUrl": null
+  },
+  "content": {
+    "type": "image",
+    "url": "/uploads/z9u7ykh6gs/content-e30f1d0fa1.jpg",
+    "fileName": "view-of-delft.jpg",
+    "fit": "natural",
+    "loop": true,
+    "startMuted": true,
+    "playAnimations": true,
+    "aspect": 1
+  },
+  "placement": {
+    "scale": 0.48,
+    "offsetX": 0.24,
+    "offsetY": -0.36,
+    "offsetZ": 0.08,
+    "rotationX": 0,
+    "rotationY": -15,
+    "rotationZ": 0
+  },
+  "hotspots": [
+    {
+      "id": "pearl",
+      "label": "The pearl",
+      "x": 0.61,
+      "y": 0.53
+    },
+    {
+      "id": "turban",
+      "label": "Ultramarine turban",
+      "x": 0.49,
+      "y": 0.18
+    },
+    {
+      "id": "gaze",
+      "label": "The gaze",
+      "x": 0.33,
+      "y": 0.37
+    }
+  ],
+  "target": {
+    "imageUrl": "/uploads/z9u7ykh6gs/target-f9e22b9d42.jpg",
+    "mindUrl": "/uploads/z9u7ykh6gs/target-aa074b58d8.mind",
+    "width": 865,
+    "height": 1024,
+    "quality": "good",
+    "featureCount": 2285
+  },
+  "createdAt": "2026-10-28T12:03:37.894Z",
+  "updatedAt": "2026-10-28T12:03:37.894Z"
+}

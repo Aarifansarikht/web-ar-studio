@@ -9,6 +9,11 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react(), ...(useHttps ? [basicSsl()] : [])],
+    define: {
+      // Vercel sets VERCEL=1 at build time: there is no API there, so the app
+      // reads the exported static data directly instead of probing /api.
+      __STATIC_HOST__: JSON.stringify(process.env.VERCEL === '1' || env.VITE_STATIC_HOST === 'true'),
+    },
     server: {
       host: true,
       port: 5173,

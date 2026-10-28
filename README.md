@@ -79,6 +79,20 @@ The admin sidebar and QR panel show whether the QR base URL is **Public HTTPS**,
 
 ## Deployment
 
+### Vercel (static, read-only showcase): https://web-ar-studio-lovat.vercel.app
+
+Vercel cannot run the Express upload server: it has no persistent disk and no long-running process. So the Vercel site is a **read-only showcase** of published experiences:
+
+1. Create or edit experiences locally (`npm run dev`).
+2. Run `npm run export:static`. This copies every **published** experience and its files into `public/static-data/` and `public/uploads/`.
+3. Commit and push. Vercel builds with `npm run build` and serves everything statically.
+
+On Vercel (`VERCEL=1` at build time) the app reads `/static-data` instead of `/api`. The AR pages and QR codes work fully; the admin is browse-only. `vercel.json` rewrites every app route to `index.html`, so refreshing or opening deep links (`/admin/...`, `/ar/:id`, QR links) works. `.env.production` sets `VITE_PUBLIC_APP_URL` to the Vercel domain so QR codes point there.
+
+To create and edit experiences online, deploy the Node server instead (below), or move storage to a hosted backend (e.g. Supabase/S3 plus a database).
+
+### Node server
+
 Any Node host with persistent disk and HTTPS works (a VPS behind Caddy/Nginx, Render, Railway or Fly.io with a volume, etc.):
 
 ```bash

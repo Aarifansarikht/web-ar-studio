@@ -3,11 +3,14 @@ import { Link, useNavigate } from 'react-router-dom';
 import Icon from '../components/common/Icon.jsx';
 import { useToast } from '../components/common/Toast.jsx';
 import ExperienceForm from '../components/admin/ExperienceForm.jsx';
+import ReadOnlyNotice from '../components/admin/ReadOnlyNotice.jsx';
+import { useDataSource } from '../hooks/useDataSource.js';
 import styles from './AdminPages.module.css';
 
 export default function CreateExperience() {
   const navigate = useNavigate();
   const toast = useToast();
+  const source = useDataSource();
 
   useEffect(() => {
     document.title = 'New experience · WebAR Studio';
@@ -24,13 +27,17 @@ export default function CreateExperience() {
           <p className={styles.sub}>Upload a target image, attach AR content, and publish to get a QR code.</p>
         </div>
       </header>
-      <ExperienceForm
-        mode="create"
-        onSaved={(exp) => {
-          toast.success('Experience created — your QR code is ready');
-          navigate(`/admin/experiences/${exp.id}`);
-        }}
-      />
+      {source === 'static' ? (
+        <ReadOnlyNotice />
+      ) : source === 'api' ? (
+        <ExperienceForm
+          mode="create"
+          onSaved={(exp) => {
+            toast.success('Experience created — your QR code is ready');
+            navigate(`/admin/experiences/${exp.id}`);
+          }}
+        />
+      ) : null}
     </div>
   );
 }

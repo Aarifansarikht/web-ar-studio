@@ -5,6 +5,9 @@ import StateView from '../components/common/StateView.jsx';
 import { useToast } from '../components/common/Toast.jsx';
 import ExperienceForm from '../components/admin/ExperienceForm.jsx';
 import QRPanel from '../components/qr/QRPanel.jsx';
+import ReadOnlyNotice from '../components/admin/ReadOnlyNotice.jsx';
+import ExperienceSummary from '../components/admin/ExperienceSummary.jsx';
+import { useDataSource } from '../hooks/useDataSource.js';
 import { AUTH_UPDATED_EVENT } from '../components/admin/AdminAuthGate.jsx';
 import { deleteExperience, getExperience, setExperienceStatus } from '../services/experienceService.js';
 import { formatDate } from '../utils/format.js';
@@ -16,6 +19,7 @@ export default function ManageExperience() {
   const toast = useToast();
   const [state, setState] = useState({ loading: true, error: null, experience: null });
   const [busy, setBusy] = useState(false);
+  const source = useDataSource();
   // Remount the form after each save so it starts from the server's copy.
   const [formKey, setFormKey] = useState(0);
 
@@ -99,6 +103,7 @@ export default function ManageExperience() {
   }
 
   const published = exp.status === 'published';
+  const readOnly = source !== 'api'; // also true while the data source is being detected
 
   return (
     <div className={styles.page}>
@@ -119,6 +124,12 @@ export default function ManageExperience() {
 
       <div className={styles.manageGrid}>
         <div className={styles.manageMain}>
+          {source === null ? null : readOnly ? (
+            <>
+              <ReadOnlyNotice />
+              <ExperienceSummary experience={exp} />
+            </>
+          ) : (
           <ExperienceForm
             key={formKey}
             mode="edit"
@@ -129,10 +140,13 @@ export default function ManageExperience() {
               toast.success('Changes saved');
             }}
           />
+          )}
         </div>
 
         <aside className={styles.manageAside}>
           <QRPanel experience={exp} />
+          {!readOnly && (
+            <>
 
           <section className={`card ${styles.sideCard}`}>
             <h2>Publication</h2>
@@ -154,6 +168,8 @@ export default function ManageExperience() {
               <Icon name="trash" /> Delete experience
             </button>
           </section>
+            </>
+          )}
         </aside>
       </div>
     </div>
