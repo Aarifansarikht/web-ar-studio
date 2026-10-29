@@ -15,10 +15,25 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
  *    256px the grid only covers the frame centre and needs up to 9 frames, so
  *    re-finding the image after the camera moved away was slow. A 512px window
  *    (largest power of two that fits the frame) covers the whole frame in 3.
+ *  - Recognise the image from a partial view (e.g. one corner). The matcher
+ *    (inside MindAR's web worker, embedded as base64) votes for where the
+ *    image centre lands, but only accepts votes in ±1.2 frame sizes around the
+ *    frame's top-left corner, so a close-up of the top-left or bottom-left of
+ *    the image (centre beyond the right/bottom edge) was never recognised.
+ *    The vote range now extends two frame sizes beyond every edge.
  * Works with existing .mind files (both levels are always compiled).
  * MINDAR_TRACK_LEVEL=1 restores MindAR's defaults (for A/B testing).
  */
 function mindarTrackingTuning(level, detectWindow) {
+  const WORKER_RE = /const IC = "([A-Za-z0-9+/=]+)"/;
+  const HOUGH_ORIGINAL = 'i=t*1.2,h=-i,l=s*1.2,u=-l,';
+  const HOUGH_TUNED = 'i=t+2*Math.max(t,s),h=-2*Math.max(t,s),l=s+2*Math.max(t,s),u=-2*Math.max(t,s),';
+  const patchWorker = (code) =>
+    code.replace(WORKER_RE, (_, b64) => {
+      const src = Buffer.from(b64, 'base64').toString('utf8');
+      if (!src.includes(HOUGH_ORIGINAL)) throw new Error('[mindar-tracking-tuning] matcher code not found in worker.');
+      return `const IC = "${Buffer.from(src.replace(HOUGH_ORIGINAL, HOUGH_TUNED), 'utf8').toString('base64')}"`;
+    });
   const ORIGINAL = 'Z5 = 6, B5 = 1, H5 = 10, _5 = 1, U5 = 0.8, Y5 = 1,';
   const CROP_ORIGINAL = 'let o = Math.min(t, e) / 2, r = Math.pow(2, Math.round(Math.log(o) / Math.log(2)));';
   const CROP_TUNED = 'let o = Math.min(t, e), r = Math.pow(2, Math.floor(Math.log(o) / Math.log(2)));';
@@ -30,11 +45,11 @@ function mindarTrackingTuning(level, detectWindow) {
     transform(code, id) {
       // Dev requests carry a version query (?v=…); production ids don't.
       if (!/mind-ar[\\/]dist[\\/]controller-mGt1s8dJ\.js$/.test(id.split('?')[0])) return null;
-      if (!code.includes(ORIGINAL) || !code.includes(CROP_ORIGINAL) || !code.includes(LEVEL_ORIGINAL)) {
+      if (!code.includes(ORIGINAL) || !code.includes(CROP_ORIGINAL) || !code.includes(LEVEL_ORIGINAL) || !WORKER_RE.test(code)) {
         throw new Error('[mindar-tracking-tuning] tracker code not found — mind-ar version changed? Re-check the patch.');
       }
       if (level === 1) return null;
-      const tuned = code
+      const tuned = patchWorker(code)
         .replace(ORIGINAL, 'Z5 = 6, B5 = 1, H5 = 12, _5 = 1, U5 = 0.8, Y5 = 1,')
         .replace(CROP_ORIGINAL, detectWindow === 'small' ? CROP_ORIGINAL : CROP_TUNED)
         .replace(LEVEL_ORIGINAL, LEVEL_TUNED);

@@ -328,72 +328,6 @@
   border-top-color: var(--accent);
   animation: spin 0.8s linear infinite;
 }
-.scanArea {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  padding: 90px 36px 140px;
-  animation: fadeIn 0.3s ease-out;
-}
-.scanFrame {
-  position: relative;
-  width: min(78vw, 420px);
-  max-height: 52vh;
-  max-width: 100%;
-}
-.scanFrame img {
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  opacity: 0.32;
-  border-radius: 6px;
-  animation: breathe 2.4s ease-in-out infinite;
-}
-.scanFrame i {
-  position: absolute;
-  width: 34px;
-  height: 34px;
-  border: 3px solid #fff;
-  filter: drop-shadow(0 0 6px rgba(0, 0, 0, 0.5));
-}
-.c1 {
-  top: -10px;
-  left: -10px;
-  border-right: 0 !important;
-  border-bottom: 0 !important;
-  border-top-left-radius: 10px;
-}
-.c2 {
-  top: -10px;
-  right: -10px;
-  border-left: 0 !important;
-  border-bottom: 0 !important;
-  border-top-right-radius: 10px;
-}
-.c3 {
-  bottom: -10px;
-  left: -10px;
-  border-right: 0 !important;
-  border-top: 0 !important;
-  border-bottom-left-radius: 10px;
-}
-.c4 {
-  bottom: -10px;
-  right: -10px;
-  border-left: 0 !important;
-  border-top: 0 !important;
-  border-bottom-right-radius: 10px;
-}
-.scanLine {
-  position: absolute;
-  left: 4%;
-  right: 4%;
-  height: 2px;
-  background: var(--accent);
-  box-shadow: 0 0 14px 2px var(--accent);
-  animation: scan 2.2s ease-in-out infinite;
-}
 .hudBottom {
   position: absolute;
   left: 0;
@@ -581,20 +515,6 @@
 @keyframes spin {
   to {
     transform: rotate(360deg);
-  }
-}
-@keyframes breathe {
-  50% {
-    opacity: 0.16;
-  }
-}
-@keyframes scan {
-  0%,
-  100% {
-    top: 4%;
-  }
-  50% {
-    top: 96%;
   }
 }
 @keyframes slowZoom {

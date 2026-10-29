@@ -59,7 +59,7 @@ export default function ARSplash({ experience, progress, ready, loadError, onRet
               <Icon name="camera" size={20} /> Start AR
             </button>
             <p className={styles.splashHint}>
-              <Icon name="target" size={16} /> Point your camera at the image. You&apos;ll be asked for camera access.
+              <Icon name="target" size={16} /> Point your camera at the artwork, even just part of it. You&apos;ll be asked for camera access.
             </p>
           </div>
         )}

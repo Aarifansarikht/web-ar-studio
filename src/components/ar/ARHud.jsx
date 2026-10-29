@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import Icon from '../common/Icon.jsx';
 import BrandHeader from './BrandHeader.jsx';
-import { assetUrl } from '../../utils/url.js';
 import styles from './AR.module.css';
 
 // A short loss of tracking (camera moved away briefly) must not interrupt the
@@ -39,10 +38,6 @@ export default function ARHud({ experience, ar, onClose }) {
     return () => clearTimeout(t);
   }, [status]);
 
-  const aspect = experience.target.width && experience.target.height
-    ? experience.target.width / experience.target.height
-    : 1;
-
   return (
     <div className={styles.hud}>
       <header className={styles.hudTop}>
@@ -67,24 +62,12 @@ export default function ARHud({ experience, ar, onClose }) {
         </div>
       )}
 
-      {scanning && (
-        <div className={styles.scanArea} aria-hidden="true">
-          <div className={styles.scanFrame} style={{ aspectRatio: aspect }}>
-            <img src={assetUrl(experience.target.imageUrl)} alt="" />
-            <i className={styles.c1} />
-            <i className={styles.c2} />
-            <i className={styles.c3} />
-            <i className={styles.c4} />
-            <span className={styles.scanLine} />
-          </div>
-        </div>
-      )}
-
       <div className={styles.hudBottom}>
+        {/* No scan frame: any part of the image (even one corner) is recognised. */}
         {scanning && (
           <p className={styles.hint} role="status">
             <Icon name="camera" size={18} />
-            Point your camera at the image
+            Point your camera at the artwork
           </p>
         )}
         {showLostHint && !ar.fullscreen && (
