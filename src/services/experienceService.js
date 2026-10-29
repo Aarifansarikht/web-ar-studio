@@ -9,7 +9,7 @@ import { ApiError, apiRequest, apiUpload } from './apiClient.js';
  *   target:    { imageUrl, mindUrl, width, height, quality, featureCount },
  *   content:   { type: 'video' | 'image' | 'model', url, fileName, fit, loop, startMuted, playAnimations, aspect },
  *   placement: { scale, offsetX, offsetY, offsetZ, rotationX, rotationY, rotationZ },
- *   hotspots:  [{ id, label, x, y }],   // x/y normalised from the target's top-left
+ *   hotspots:  [{ id, label, x, y, z }], // x/y normalised from the target's top-left; z = height in target widths
  *   createdAt, updatedAt
  * }
  */
@@ -45,6 +45,7 @@ export function createEmptyDraft() {
       loop: true,
       startMuted: true,
       playAnimations: true,
+      alignToTarget: false,
       aspect: 1,
     },
     placement: { ...DEFAULT_PLACEMENT },

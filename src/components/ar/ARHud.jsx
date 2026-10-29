@@ -7,6 +7,7 @@ import styles from './AR.module.css';
 const CHIP = {
   tracking: { label: 'Tracking', tone: 'live' },
   holding: { label: 'Extended tracking', tone: 'hold' },
+  searching: { label: 'Searching', tone: 'hold' },
   fullscreen: { label: 'Full screen', tone: 'live' },
 };
 
@@ -79,6 +80,12 @@ export default function ARHud({ experience, ar, onClose }) {
           <p className={styles.hint} role="status">
             <Icon name="camera" size={18} />
             Point your camera at the image
+          </p>
+        )}
+        {status === 'searching' && !ar.fullscreen && (
+          <p className={styles.hint} role="status">
+            <Icon name="target" size={18} />
+            Point at the artwork to continue
           </p>
         )}
         {active && showTapHint && (

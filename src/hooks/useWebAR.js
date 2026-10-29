@@ -11,8 +11,9 @@ import { LockOnFrame } from '../ar/lockOn.js';
  * status: 'idle' | 'starting' | 'scanning' | 'tracking' | 'holding' | 'error'
  *   scanning  – target not found yet
  *   tracking  – target in view, content anchored to it
- *   holding   – target left the view after being found; content stays
- *               (gyro-stabilised extended tracking) and re-locks when seen again
+ *   holding   – target left the view after being found; content stays on the
+ *               wall (gyro-stabilised) and re-locks when seen again
+ *   searching – hold expired; content hidden until the target is seen again
  *
  * The camera is only requested when `start()` is called (from a user tap).
  * `stop()` and unmount release the camera, the tracking worker, the WebGL
@@ -89,9 +90,12 @@ export function useWebAR({ containerRef, experience, assets }) {
           setStatus('tracking');
           if (!session.fullscreen) rt.lockOn?.play();
           playContent();
-        } else {
-          // Keep the content visible and playing: no return to the scan screen.
+        } else if (type === 'lost') {
+          // Content stays on the wall (extended tracking); no scan screen.
           setStatus('holding');
+        } else {
+          // Hold expired: content hidden until the artwork is seen again.
+          setStatus('searching');
         }
       },
       onModeChange: ({ fullscreen: on }) => {

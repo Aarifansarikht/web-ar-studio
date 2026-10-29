@@ -1,0 +1,30 @@
+[
+  {
+    "id": "h1",
+    "label": "Wide center rib",
+    "x": 0.8588,
+    "y": 0.5541,
+    "z": 0.2118
+  },
+  {
+    "id": "h2",
+    "label": "Strong shoulder",
+    "x": 0.8219,
+    "y": 0.4225,
+    "z": 0.2231
+  },
+  {
+    "id": "h3",
+    "label": "Wet-grip grooves",
+    "x": 0.8406,
+    "y": 0.6668,
+    "z": 0.204
+  },
+  {
+    "id": "h4",
+    "label": "Sidewall design",
+    "x": 0.6472,
+    "y": 0.3674,
+    "z": 0.077
+  }
+]

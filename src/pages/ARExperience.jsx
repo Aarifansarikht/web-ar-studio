@@ -50,7 +50,7 @@ export default function ARExperience() {
   const start = useCallback(() => ar.start(), [ar]);
 
   const accent = experience?.brand?.accentColor || '#e5173f';
-  const inSession = ['starting', 'scanning', 'tracking', 'holding'].includes(ar.status);
+  const inSession = ['starting', 'scanning', 'tracking', 'holding', 'searching'].includes(ar.status);
 
   let overlay = null;
   if (load.loading) {

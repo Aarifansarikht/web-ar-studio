@@ -18,7 +18,8 @@ function mindarTrackingTuning(level) {
     name: 'mindar-tracking-tuning',
     enforce: 'pre',
     transform(code, id) {
-      if (!/mind-ar[\\/]dist[\\/]controller-mGt1s8dJ\.js$/.test(id)) return null;
+      // Dev requests carry a version query (?v=…); production ids don't.
+      if (!/mind-ar[\\/]dist[\\/]controller-mGt1s8dJ\.js$/.test(id.split('?')[0])) return null;
       if (!code.includes(ORIGINAL)) {
         throw new Error('[mindar-tracking-tuning] tracker constants not found — mind-ar version changed? Re-check the patch.');
       }

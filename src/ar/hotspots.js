@@ -75,7 +75,7 @@ export class HotspotLayer {
 
   #add(h) {
     const root = new THREE.Group();
-    root.position.set(h.x - 0.5, (0.5 - h.y) * this.targetAspect, HOTSPOT_Z);
+    root.position.set(h.x - 0.5, (0.5 - h.y) * this.targetAspect, HOTSPOT_Z + (h.z ?? 0));
     root.scale.setScalar(this.sizeScale);
     root.userData.hotspotId = h.id;
 

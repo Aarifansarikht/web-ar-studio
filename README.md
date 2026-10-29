@@ -147,11 +147,27 @@ The app uses MindAR's low-level **`Controller`** (the actual tracking engine) wi
   - Add `?debug` to an AR link to show the tracker's frame rate on a phone.
   - Targets compiled before this change still work but should be re-uploaded (Admin → Replace target image) to get the close-up improvement.
 - **Lock-on cue.** Accent corner brackets snap onto the target when it is recognised.
-- **No re-scan after the first lock.** If the image leaves the view, the content stays (*Extended tracking* chip). With motion sensors (requested on the Start tap; iOS shows a prompt), the content is **gyro-anchored**: turning the phone away and back keeps it where the poster was (3-DoF). Without sensors, it holds its last screen position.
-- **Auto full screen.** If the held content stays off-screen for more than 1.2 s, it glides into a centred full-screen view and the camera feed dims. When the image is seen again, the content glides back onto it automatically.
+- **No re-scan after the first lock.** If the image leaves the view, the content stays (*Extended tracking* chip). With motion sensors (requested on the Start tap; iOS shows a prompt), the content is **gyro-anchored** on the wall for up to 4 s (3-DoF). Without sensors it hides after 0.5 s (see "Tracking when the image is lost").
 - **Manual full screen.** The expand button shows the content full screen at any time; tap again to return to the AR view.
 
 Limits: extended tracking compensates rotation only. If the user walks sideways, the held content does not shift with them until the image is re-detected.
+
+### Layered 3D scenes (artwork stays on the wall)
+
+For the most convincing effect, don't cover the whole print with a flat video. Leave the real artwork visible through the camera and add **3D elements that come off it**, like Artivive. Upload a GLB as **3D model** and tick **"Scene is authored in target space"**:
+
+- Units: 1 = image width, origin at the image centre, +X right, +Y up, +Z out of the wall. Nothing is auto-scaled, so the scene lines up with the print.
+- Animation clips named `intro` play once when the image is first recognised (e.g. an element lifting off the wall). A clip named `loop` repeats. Other GLBs play their first clip.
+- Unlit (`KHR_materials_unlit`) materials keep the artwork's exact colours. Use them for wall patches, glows and light effects. Lit (PBR) materials get studio lighting and filmic tone mapping.
+- Hotspots accept an optional `z` (height above the image, in image widths), so markers can sit on 3D parts.
+
+The CEAT demo (`demo-assets/ceat/ceat-ar-scene.glb`) is built this way. It contains a feathered clean patch that hides the printed tyre, the same 3D tyre (PBR) lifting 0.1 image widths off the wall and spinning, a contact shadow, a glow, and light streaks. It is about 54k triangles, 2.1 MB, and was validated with Blender's glTF importer.
+
+### Tracking when the image is lost
+
+- With motion sensors: the content stays world-anchored on the wall (rotation-compensated) for up to 4 s, then hides.
+- Without motion sensors: only brief dropouts (0.5 s) are bridged, then the content hides with a "Point at the artwork" hint. It never freezes on screen as a floating picture.
+- Rotation is smoothed more strongly than position. Rotation is the noisiest part of a single-camera pose and shows up as a tilting/wobbling overlay.
 
 ### AR content
 

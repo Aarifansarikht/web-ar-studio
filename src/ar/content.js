@@ -9,6 +9,12 @@ const easeOut = (t) => 1 - Math.pow(1 - t, 3);
 
 /** Neutral studio lighting for PBR models. Returns a dispose function. */
 export function addModelLighting(scene, renderer) {
+  // Filmic tone mapping for lit (PBR) materials; unlit layers opt out below so
+  // they keep the exact colours of the printed artwork.
+  const prevToneMapping = renderer.toneMapping;
+  const prevExposure = renderer.toneMappingExposure;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.1;
   const pmrem = new THREE.PMREMGenerator(renderer);
   const envTexture = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
   scene.environment = envTexture;
@@ -17,6 +23,8 @@ export function addModelLighting(scene, renderer) {
   dir.position.set(0.5, 1, 1.5);
   scene.add(hemi, dir);
   return () => {
+    renderer.toneMapping = prevToneMapping;
+    renderer.toneMappingExposure = prevExposure;
     scene.remove(hemi, dir);
     scene.environment = null;
     envTexture.dispose();
@@ -49,7 +57,21 @@ function loadVideo(url, { loop, startMuted }) {
  * glTF model. All units are relative to the target width (see ImageTrackingSession).
  */
 export class ARContent {
-  constructor({ type, root, visual, video = null, mixer = null, materials = [], baseVisualScale = 1, disposeExtra }) {
+  constructor({
+    type,
+    root,
+    visual,
+    video = null,
+    mixer = null,
+    introAction = null,
+    materials = [],
+    baseVisualScale = 1,
+    revealScale = true,
+    disposeExtra,
+  }) {
+    this.introAction = introAction;
+    this.revealScale = revealScale;
+    this.introPlayed = false;
     this.type = type;
     this.root = root;
     this.visual = visual;
@@ -71,6 +93,12 @@ export class ARContent {
   /** Called when the target is found. Resolves `{ blocked }` if video autoplay was refused. */
   async onFound() {
     this.revealing = true;
+    // Authored "intro" animation (e.g. the tyre lifting off the wall): play
+    // once, on the first lock only.
+    if (this.introAction && !this.introPlayed) {
+      this.introPlayed = true;
+      this.introAction.reset().play();
+    }
     if (!this.video) return { blocked: false };
     try {
       await this.video.play();
@@ -90,6 +118,10 @@ export class ARContent {
   /** Show fully without a tracking event (admin preview). */
   showImmediately() {
     this.revealing = true;
+    if (this.introAction) {
+      this.introPlayed = true;
+      this.introAction.reset().play();
+    }
     this.reveal = 1;
     this.#applyReveal();
   }
@@ -105,7 +137,8 @@ export class ARContent {
   #applyReveal() {
     const t = easeOut(this.reveal);
     if (this.type === 'model') {
-      this.visual.scale.setScalar(this.baseVisualScale * (0.6 + 0.4 * t));
+      // Target-aligned scenes must not be rescaled (they would drift off the print).
+      if (this.revealScale) this.visual.scale.setScalar(this.baseVisualScale * (0.6 + 0.4 * t));
     } else {
       for (const m of this.materials) m.opacity = t;
     }
@@ -190,33 +223,67 @@ export async function createARContent({ content, placement, targetAspect, url, m
     }
 
     const model = gltf.scene;
-    // Normalise: largest dimension = 1 target width, bounding box centred on
-    // the target so placement rotations pivot around the model's middle.
-    const box = new THREE.Box3().setFromObject(model);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z) || 1;
-    model.position.sub(center);
-
     const visual = new THREE.Group();
     visual.add(model);
-    const baseVisualScale = 1 / maxDim;
-    visual.scale.setScalar(baseVisualScale * 0.6);
+    let baseVisualScale = 1;
+
+    if (content.alignToTarget) {
+      // Scene authored in target space (1 unit = target width, origin at the
+      // target centre, +Z out of the image): use as-is so it lines up with the print.
+    } else {
+      // Normalise: largest dimension = 1 target width, bounding box centred on
+      // the target so placement rotations pivot around the model's middle.
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      const maxDim = Math.max(size.x, size.y, size.z) || 1;
+      model.position.sub(center);
+      baseVisualScale = 1 / maxDim;
+      visual.scale.setScalar(baseVisualScale * 0.6);
+    }
     root.add(visual);
 
+    // Unlit layers (wall patches, glows, streaks) keep the artwork's exact
+    // colours: exclude them from tone mapping.
+    model.traverse((o) => {
+      if (!o.isMesh) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        if (m?.isMeshBasicMaterial) m.toneMapped = false;
+      }
+    });
+
     let mixer = null;
+    let introAction = null;
     if (content.playAnimations && gltf.animations.length) {
-      // Play only the first clip: separate clips often drive the same joints
-      // (e.g. idle/walk/run cycles) and must not be blended together.
       mixer = new THREE.AnimationMixer(model);
-      mixer.clipAction(gltf.animations[0]).play();
+      const byName = (n) => gltf.animations.find((c) => c.name.toLowerCase() === n);
+      const intro = byName('intro');
+      const loop = byName('loop');
+      if (intro || loop) {
+        // Authored scene: "loop" runs continuously; "intro" plays once on the
+        // first lock and holds its last frame.
+        if (loop) mixer.clipAction(loop).play();
+        if (intro) {
+          introAction = mixer.clipAction(intro);
+          introAction.setLoop(THREE.LoopOnce, 1);
+          introAction.clampWhenFinished = true;
+          introAction.play();
+          introAction.paused = true; // pose at frame 0 until the target is found
+        }
+      } else {
+        // Play only the first clip: separate clips often drive the same joints
+        // (e.g. idle/walk/run cycles) and must not be blended together.
+        mixer.clipAction(gltf.animations[0]).play();
+      }
     }
     result = new ARContent({
       type: 'model',
       root,
       visual,
       mixer,
+      introAction,
       baseVisualScale,
+      revealScale: !content.alignToTarget,
       disposeExtra: () => draco.dispose(),
     });
   } else {

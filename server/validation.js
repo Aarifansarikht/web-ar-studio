@@ -72,6 +72,8 @@ export function sanitizeExperienceInput(input, previous = null) {
     loop: bool(contentIn.loop, true),
     startMuted: bool(contentIn.startMuted, true),
     playAnimations: bool(contentIn.playAnimations, true),
+    // Model authored in target space (no auto-fit), for scenes that line up with the print.
+    alignToTarget: bool(contentIn.alignToTarget, false),
     aspect: num(contentIn.aspect, 0.05, 20, previous?.content?.aspect ?? 1),
   };
 
@@ -92,6 +94,8 @@ export function sanitizeExperienceInput(input, previous = null) {
         label: str(h?.label, 40) || `Hotspot ${i + 1}`,
         x: num(h?.x, 0, 1, 0.5),
         y: num(h?.y, 0, 1, 0.5),
+        // Height above the image in target widths (for markers on 3D content).
+        z: num(h?.z, -2, 2, 0),
       }))
     : [];
 

@@ -92,14 +92,24 @@ export default function ContentField({ content, file, savedFileName, onChange, o
           </div>
         )}
         {content.type === 'model' && (
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={content.playAnimations}
-              onChange={(e) => onChange({ playAnimations: e.target.checked })}
-            />
-            Play embedded animations
-          </label>
+          <div className={styles.checks}>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={content.playAnimations}
+                onChange={(e) => onChange({ playAnimations: e.target.checked })}
+              />
+              Play embedded animations (clips named “intro” play once, “loop” repeats)
+            </label>
+            <label className="checkbox">
+              <input
+                type="checkbox"
+                checked={Boolean(content.alignToTarget)}
+                onChange={(e) => onChange({ alignToTarget: e.target.checked })}
+              />
+              Scene is authored in target space (no auto-fit: 1 unit = image width, origin at its centre)
+            </label>
+          </div>
         )}
       </div>
     </div>

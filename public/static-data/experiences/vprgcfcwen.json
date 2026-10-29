@@ -1,7 +1,7 @@
 {
   "id": "vprgcfcwen",
   "name": "CEAT Premium Touring Tyre",
-  "description": "Point your camera at the poster to watch the tyre come alive. Tap the dots to explore the tread.",
+  "description": "Point your camera at the poster: the tyre lifts off the wall in 3D. Move around it and tap the dots to explore the tread.",
   "status": "published",
   "brand": {
     "name": "CEAT",
@@ -10,13 +10,14 @@
     "coverUrl": "/uploads/vprgcfcwen/cover-5e85748f62.jpg"
   },
   "content": {
-    "type": "video",
-    "url": "/uploads/vprgcfcwen/content-81faaccec1.mp4",
-    "fileName": "ceat-ar.mp4",
+    "type": "model",
+    "url": "/uploads/vprgcfcwen/content-0b589a4a98.glb",
+    "fileName": "ceat-ar-scene.glb",
     "fit": "target",
     "loop": true,
     "startMuted": true,
     "playAnimations": true,
+    "alignToTarget": true,
     "aspect": 1
   },
   "placement": {
@@ -32,26 +33,30 @@
     {
       "id": "h1",
       "label": "Wide center rib",
-      "x": 0.871,
-      "y": 0.5557
+      "x": 0.8588,
+      "y": 0.5541,
+      "z": 0.2118
     },
     {
       "id": "h2",
       "label": "Strong shoulder",
-      "x": 0.8309,
-      "y": 0.4078
+      "x": 0.8219,
+      "y": 0.4225,
+      "z": 0.2231
     },
     {
       "id": "h3",
       "label": "Wet-grip grooves",
-      "x": 0.85,
-      "y": 0.68
+      "x": 0.8406,
+      "y": 0.6668,
+      "z": 0.204
     },
     {
       "id": "h4",
       "label": "Sidewall design",
-      "x": 0.6493,
-      "y": 0.3709
+      "x": 0.6472,
+      "y": 0.3674,
+      "z": 0.077
     }
   ],
   "target": {
@@ -63,5 +68,5 @@
     "featureCount": 2466
   },
   "createdAt": "2026-10-28T12:20:02.900Z",
-  "updatedAt": "2026-10-29T05:12:16.324Z"
+  "updatedAt": "2026-10-29T05:34:36.344Z"
 }

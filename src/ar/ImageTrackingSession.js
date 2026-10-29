@@ -7,6 +7,10 @@ let activeSession = null;
 
 const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const IDENTITY_QUAT = new THREE.Quaternion();
+// How long lost content stays on the wall: with the gyroscope it stays
+// world-anchored (rotation-compensated); without, only brief dropouts are bridged.
+const GYRO_HOLD_SECONDS = 4;
+const STATIC_HOLD_SECONDS = 0.5;
 // Rotates the device frame so the camera looks out of the back of the phone.
 const DEVICE_TO_CAMERA = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
 
@@ -23,8 +27,9 @@ export class ImageTrackingSession {
    * @param {object} opts
    * @param {HTMLElement} opts.container Full-size element that will host the video and canvas.
    * @param {ArrayBuffer} opts.mindBuffer Compiled `.mind` target data.
-   * @param {(e: {type: 'found'|'lost'}) => void} [opts.onTrackingChange]
-   * @param {(e: {fullscreen: boolean, auto: boolean}) => void} [opts.onModeChange]
+   * @param {(e: {type: 'found'|'lost'|'searching'}) => void} [opts.onTrackingChange]
+   *   lost = target left the view, content held on the wall; searching = hold expired, content hidden
+   * @param {(e: {fullscreen: boolean}) => void} [opts.onModeChange]
    * @param {(dt: number, elapsed: number) => void} [opts.onFrame]
    */
   constructor({ container, mindBuffer, onTrackingChange, onModeChange, onFrame }) {
@@ -71,6 +76,8 @@ export class ImageTrackingSession {
     this._orientation = null;
     this._snapPose = false;
     this._blendUntil = 0;
+    this._lostAt = 0;
+    this._holdExpired = false;
     /** Diagnostics: tracker frames processed per second. */
     this.stats = { trackFps: 0 };
     this._trackFrames = 0;
@@ -228,11 +235,12 @@ export class ImageTrackingSession {
       this._trackedMatrix.fromArray(worldMatrix).multiply(this._postMatrix);
       if (!this.tracking) {
         this.tracking = true;
-        if (!this.everFound) this._snapPose = true;
-        else this._blendUntil = this.clock.elapsedTime + 0.5; // glide back from the held pose
+        // First lock, or the held content had already been hidden: appear in
+        // place. Otherwise glide from the held pose back onto the target.
+        if (!this.everFound || this._holdExpired) this._snapPose = true;
+        else this._blendUntil = this.clock.elapsedTime + 0.35;
         this.everFound = true;
-        // Re-anchor automatically if full screen was entered automatically.
-        if (this.fullscreen === 'auto') this.#setMode(false);
+        this._holdExpired = false;
         this.onTrackingChange?.({ type: 'found' });
       }
     } else if (this.tracking) {
@@ -241,6 +249,7 @@ export class ImageTrackingSession {
       // is available, counter-rotate it as the phone turns.
       this._holdMatrix.copy(this._trackedMatrix);
       this._holdDeviceQuat = this.#deviceQuaternion()?.clone() ?? null;
+      this._lostAt = this.clock.elapsedTime;
       this.onTrackingChange?.({ type: 'lost' });
     }
   }
@@ -249,55 +258,11 @@ export class ImageTrackingSession {
 
   /** Show the content facing the camera, sized to fill the screen (independent of tracking). */
   setFullscreen(on) {
-    // Leaving an automatic full screen by hand: don't re-enter it until the
-    // target has been seen again.
-    if (!on && this.fullscreen === 'auto') this._autoSuppressed = true;
-    this.#setMode(on ? 'manual' : false);
-  }
-
-  /** false | 'manual' (user toggled) | 'auto' (content drifted off-screen while holding). */
-  #setMode(mode) {
-    if (this.fullscreen === mode) return;
-    this.fullscreen = mode;
+    if (this.fullscreen === on) return;
+    this.fullscreen = on;
     this._blendUntil = this.clock.elapsedTime + 0.7;
-    this._offscreenSince = null;
-    if (mode && !this.everFound) this._snapPose = true;
-    this.onModeChange?.({ fullscreen: Boolean(mode), auto: mode === 'auto' });
-  }
-
-  /** True when the target rectangle at the current pose does not intersect the screen. */
-  #contentOffscreen() {
-    const h = this.targetAspect / 2;
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const [x, y] of [[-0.5, -h], [0.5, -h], [-0.5, h], [0.5, h]]) {
-      const p = this._tmpPos.set(x, y, 0).applyMatrix4(this.anchor.matrix);
-      if (p.z > 0) return true; // behind the camera
-      p.project(this.camera);
-      minX = Math.min(minX, p.x);
-      maxX = Math.max(maxX, p.x);
-      minY = Math.min(minY, p.y);
-      maxY = Math.max(maxY, p.y);
-    }
-    // Treat "barely visible" (under ~8% overlap on an axis) as off-screen too.
-    return maxX < -0.84 || minX > 0.84 || maxY < -0.84 || minY > 0.84;
-  }
-
-  /** While holding, glide into full screen if the content stays off-screen. */
-  #checkAutoFullscreen() {
-    if (this.tracking) this._autoSuppressed = false;
-    if (this.tracking || this.fullscreen || !this.everFound || this._autoSuppressed) {
-      this._offscreenSince = null;
-      return;
-    }
-    if (!this.#contentOffscreen()) {
-      this._offscreenSince = null;
-      return;
-    }
-    this._offscreenSince ??= this.clock.elapsedTime;
-    if (this.clock.elapsedTime - this._offscreenSince > 1.2) this.#setMode('auto');
+    if (on && (!this.everFound || this._holdExpired)) this._snapPose = true;
+    this.onModeChange?.({ fullscreen: on });
   }
 
   /** Enable gyroscope-assisted extended tracking (call after permission is granted). */
@@ -340,14 +305,24 @@ export class ImageTrackingSession {
       );
     }
     if (this.tracking) return this._goal.copy(this._trackedMatrix);
-    if (!this.everFound) return null;
+    if (!this.everFound || this._holdExpired) return null;
+
+    // Target lost: keep the content attached to the wall where it was.
+    const held = this.clock.elapsedTime - this._lostAt;
     const now = this.#deviceQuaternion();
-    if (now && this._holdDeviceQuat) {
-      // anchor_now = R(camera_now⁻¹ · camera_at_loss) · anchor_at_loss
+    if (now && this._holdDeviceQuat && held < GYRO_HOLD_SECONDS) {
+      // Gyro-stabilised (rotation only): anchor_now = R(camera_now⁻¹ · camera_at_loss) · anchor_at_loss
       this._relQuat.copy(now).invert().multiply(this._holdDeviceQuat);
       return this._goal.makeRotationFromQuaternion(this._relQuat).multiply(this._holdMatrix);
     }
-    return this._goal.copy(this._holdMatrix);
+    if (!now && held < STATIC_HOLD_SECONDS) {
+      // No motion sensors: bridge short dropouts (motion blur) only. Holding
+      // longer would leave a picture floating on screen, detached from the wall.
+      return this._goal.copy(this._holdMatrix);
+    }
+    this._holdExpired = true;
+    this.onTrackingChange?.({ type: 'searching' });
+    return null;
   }
 
   #updatePose(dt) {
@@ -364,13 +339,16 @@ export class ImageTrackingSession {
       this._snapPose = false;
     } else {
       // Frame-rate independent exponential smoothing. Tracker poses arrive at
-      // ~15-30 Hz; easing at render rate (60 Hz) removes stepping and residual
-      // jitter. Mode changes (re-lock, full screen) use a slower glide.
-      const rate = this.clock.elapsedTime < this._blendUntil ? 7 : this.tracking ? 26 : 30;
-      const k = 1 - Math.exp(-dt * rate);
-      this._cp.lerp(this._gp, k);
-      this._cq.slerp(this._gq, k);
-      this._cs.lerp(this._gs, k);
+      // ~15-30 Hz; easing at render rate (60 Hz) removes stepping. Rotation is
+      // the noisiest part of a single-camera pose estimate (it shows as the
+      // content "tilting"), so it is smoothed more than position, which stays
+      // responsive and keeps the content glued to the image.
+      const blending = this.clock.elapsedTime < this._blendUntil;
+      const posRate = blending ? 9 : this.tracking ? 28 : 30;
+      const rotRate = blending ? 9 : this.tracking ? 14 : 30;
+      this._cp.lerp(this._gp, 1 - Math.exp(-dt * posRate));
+      this._cq.slerp(this._gq, 1 - Math.exp(-dt * rotRate));
+      this._cs.lerp(this._gs, 1 - Math.exp(-dt * posRate));
     }
     this.anchor.matrix.compose(this._cp, this._cq, this._cs);
     this.anchor.matrixWorldNeedsUpdate = true;
@@ -396,6 +374,7 @@ export class ImageTrackingSession {
       this.tracking = false;
       this._holdMatrix.copy(this._trackedMatrix);
       this._holdDeviceQuat = this.#deviceQuaternion()?.clone() ?? null;
+      this._lostAt = this.clock.elapsedTime;
       this.onTrackingChange?.({ type: 'lost' });
     }
     await this.#buildController();
@@ -455,7 +434,6 @@ export class ImageTrackingSession {
   #render() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     this.#updatePose(dt);
-    this.#checkAutoFullscreen();
     if (this.clock.elapsedTime - this._statsAt >= 1) {
       this.stats.trackFps = Math.round(this._trackFrames / (this.clock.elapsedTime - this._statsAt));
       this._trackFrames = 0;
