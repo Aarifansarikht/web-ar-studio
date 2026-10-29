@@ -39,6 +39,15 @@ const DELAY_MARGIN_S = 0.012;
 const MAX_PREDICT_S = 0.12;
 const VELOCITY_SMOOTHING = 0.55; // weight of the newest velocity sample
 const POSE_HISTORY = 40;
+// Centred pose fit (delayed mode). Each displayed frame's pose is a weighted
+// linear fit over the raw tracker poses before *and after* it (the delay makes
+// later ones available). A linear fit follows steady motion without lag, so
+// noise is removed while the phone moves too, unlike a causal smoother that
+// must follow fast motion and lets its noise through. Window (Gaussian sigma,
+// seconds) adapts: wide when still, narrower when moving fast. When still,
+// the fit becomes a plain weighted mean (no slope term: much less noise).
+const FIT_SIGMA_STILL = 0.3;
+const FIT_SIGMA_MOVE = 0.07;
 // Point used for the wobble diagnostic: 0.15 image widths in front of the centre.
 const WOBBLE_PROBE = new THREE.Vector3(0, 0, 0.15);
 // The tracker analyses a downscaled copy of the camera frame (long side in px).
@@ -61,6 +70,10 @@ const TUNING = (() => {
     // &live=1: show the live camera with extrapolated poses (the fallback mode).
     live: q.get('live') === '1',
     predict: q.get('predict') !== '0',
+    // &fit=0: interpolate the causally stabilised poses instead (A/B).
+    fit: q.get('fit') !== '0',
+    // &noise=<deg>: add random tracking noise (rotation deg, position deg/100 of distance) to test smoothing.
+    noise: num('noise'),
   };
 })();
 
@@ -160,6 +173,24 @@ export class ImageTrackingSession {
     this._delayed = false;
     this._shownT = 0;
     this._viewFrames = 0;
+    this._rawP = new THREE.Vector3();
+    this._rawQ = new THREE.Quaternion();
+    this._rawS = new THREE.Vector3();
+    this._fit = {
+      qInv: new THREE.Quaternion(),
+      dq: new THREE.Quaternion(),
+      r: new THREE.Vector3(),
+      p0: new THREE.Vector3(),
+      p1: new THREE.Vector3(),
+      r0: new THREE.Vector3(),
+      r1: new THREE.Vector3(),
+      s0: new THREE.Vector3(),
+      a: new THREE.Vector3(),
+      b: new THREE.Vector3(),
+    };
+    this._jerk = [];
+    this._jerkT = 0;
+    this._fitMean = new THREE.Vector3();
 
     /** Diagnostics: tracker frames processed per second. */
     this.stats = { trackFps: 0, wobbleRaw: 0, wobbleShown: 0, trackLevel: 'coarse', delayMs: 0 };
@@ -519,6 +550,8 @@ export class ImageTrackingSession {
       // from the last real measurement instead of treating it as "stopped".
       if (this.tracking && !this._frameTracked) return;
       this._trackedMatrix.fromArray(worldMatrix).multiply(this._postMatrix);
+      this._trackedMatrix.decompose(this._rawP, this._rawQ, this._rawS);
+      if (TUNING.noise) this.#addTestNoise(TUNING.noise);
       if (!this.tracking) {
         this._stabInit = false; // first frame of a lock: no history
         this._seg++;
@@ -619,13 +652,116 @@ export class ImageTrackingSession {
       this._delay += (need - this._delay) * (need > this._delay ? 0.5 : 0.02);
       this._delay = Math.max(MIN_DELAY_S, this._delay);
     }
-    const entry = P.length >= POSE_HISTORY ? P.shift() : { p: new THREE.Vector3(), q: new THREE.Quaternion(), s: new THREE.Vector3() };
+    const entry =
+      P.length >= POSE_HISTORY
+        ? P.shift()
+        : {
+            p: new THREE.Vector3(),
+            q: new THREE.Quaternion(),
+            s: new THREE.Vector3(),
+            rp: new THREE.Vector3(),
+            rq: new THREE.Quaternion(),
+            rs: new THREE.Vector3(),
+          };
     entry.t = t;
     entry.seg = this._seg;
-    entry.p.copy(this._predP);
+    entry.p.copy(this._predP); // causally stabilised (live fallback, A/B)
     entry.q.copy(this._predQ);
     entry.s.copy(this._predS);
+    entry.rp.copy(this._rawP); // raw tracker pose (centred fit)
+    entry.rq.copy(this._rawQ);
+    entry.rs.copy(this._rawS);
     P.push(entry);
+  }
+
+  /**
+   * Weighted local-linear fit of the raw poses of segment `seg` around time t
+   * (see FIT_SIGMA_*). Rotation is fitted as rotation vectors relative to the
+   * sample nearest t. Writes the pose at t into `out`.
+   */
+  #fitPose(t, seg, out) {
+    const P = this._poses;
+    const F = this._fit;
+    let ref = null;
+    let best = Infinity;
+    for (const e of P) {
+      if (e.seg !== seg) continue;
+      const d = Math.abs(e.t - t);
+      if (d < best) {
+        best = d;
+        ref = e;
+      }
+    }
+    if (!ref) return false;
+    F.qInv.copy(ref.rq).invert();
+    const { smoothstep, lerp, degToRad } = THREE.MathUtils;
+    let sigma = FIT_SIGMA_MOVE;
+    let moving = 1;
+    for (let pass = 0; pass < 2; pass++) {
+      let S0 = 0;
+      let S1 = 0;
+      let S2 = 0;
+      F.p0.set(0, 0, 0);
+      F.p1.set(0, 0, 0);
+      F.r0.set(0, 0, 0);
+      F.r1.set(0, 0, 0);
+      F.s0.set(0, 0, 0);
+      const reach = 2.5 * sigma;
+      for (const e of P) {
+        if (e.seg !== seg) continue;
+        const x = e.t - t;
+        if (x < -reach || x > reach) continue;
+        const w = Math.exp(-0.5 * (x / sigma) ** 2);
+        // Rotation vector of ref^-1 * q.
+        F.dq.copy(F.qInv).multiply(e.rq);
+        if (F.dq.w < 0) F.dq.set(-F.dq.x, -F.dq.y, -F.dq.z, -F.dq.w);
+        const sinHalf = Math.sqrt(Math.max(0, 1 - F.dq.w * F.dq.w));
+        const angle = 2 * Math.atan2(sinHalf, F.dq.w);
+        F.r.set(F.dq.x, F.dq.y, F.dq.z).multiplyScalar(sinHalf > 1e-9 ? angle / sinHalf : 2);
+        S0 += w;
+        S1 += w * x;
+        S2 += w * x * x;
+        F.p0.addScaledVector(e.rp, w);
+        F.p1.addScaledVector(e.rp, w * x);
+        F.r0.addScaledVector(F.r, w);
+        F.r1.addScaledVector(F.r, w * x);
+        F.s0.addScaledVector(e.rs, w);
+      }
+      if (S0 <= 0) return false;
+      const det = S0 * S2 - S1 * S1;
+      const linear = det > 1e-12 * Math.max(1, S0 * S0);
+      // Value at t: a = (S2*Y0 - S1*Y1)/det; slope: b = (S0*Y1 - S1*Y0)/det.
+      const fitInto = (a, b, y0, y1) => {
+        if (linear) {
+          a.copy(y0).multiplyScalar(S2).addScaledVector(y1, -S1).divideScalar(det);
+          // Blend towards the weighted mean as motion stops.
+          if (pass === 1 && moving < 1) a.lerp(this._fitMean.copy(y0).divideScalar(S0), 1 - moving);
+          b.copy(y1).multiplyScalar(S0).addScaledVector(y0, -S1).divideScalar(det);
+        } else {
+          a.copy(y0).divideScalar(S0);
+          b.set(0, 0, 0);
+        }
+      };
+      if (pass === 0) {
+        // Speed from a short-window fit picks the window for the final fit.
+        fitInto(F.a, F.b, F.p0, F.p1);
+        const rel = F.b.length() / Math.max(1e-6, F.a.length());
+        fitInto(F.a, F.b, F.r0, F.r1);
+        const rot = F.b.length();
+        moving = Math.max(smoothstep(rel, 0.03, 0.3), smoothstep(rot, degToRad(4), degToRad(40)));
+        sigma = lerp(FIT_SIGMA_STILL, FIT_SIGMA_MOVE, moving);
+        continue;
+      }
+      fitInto(this._gp, F.b, F.p0, F.p1);
+      fitInto(F.a, F.b, F.r0, F.r1);
+      const angle = F.a.length();
+      if (angle > 1e-9) this._gq.setFromAxisAngle(F.a.divideScalar(angle), angle);
+      else this._gq.identity();
+      this._gq.premultiply(ref.rq);
+      this._gs.copy(F.s0).divideScalar(S0);
+    }
+    out.compose(this._gp, this._gq, this._gs);
+    return true;
   }
 
   /**
@@ -638,8 +774,10 @@ export class ImageTrackingSession {
     const P = this._poses;
     if (!P.length || t < P[0].t - 0.002) return false;
     const last = P[P.length - 1];
+    const fit = this._delayed && TUNING.fit !== false;
     if (t >= last.t) {
       if (last.seg !== this._seg || (!this.tracking && t > last.t + 0.002)) return false;
+      if (fit) return this.#fitPose(Math.min(t, last.t + MAX_PREDICT_S), last.seg, out);
       const h = TUNING.predict === false ? 0 : Math.min(MAX_PREDICT_S, t - last.t);
       this._gp.copy(last.p).addScaledVector(this._vel, h);
       this._gq.copy(last.q);
@@ -656,12 +794,27 @@ export class ImageTrackingSession {
     const a = P[i];
     const b = P[i + 1];
     if (a.seg !== b.seg) return false; // image was lost between these frames
+    if (fit) return this.#fitPose(t, a.seg, out);
     const f = b.t > a.t ? THREE.MathUtils.clamp((t - a.t) / (b.t - a.t), 0, 1) : 1;
     this._gp.lerpVectors(a.p, b.p, f);
     this._gq.slerpQuaternions(a.q, b.q, f);
     this._gs.lerpVectors(a.s, b.s, f);
     out.compose(this._gp, this._gq, this._gs);
     return true;
+  }
+
+  /** Diagnostics only (?debug&noise=): perturb the raw pose like a noisy real camera would. */
+  #addTestNoise(deg) {
+    const g = () => (Math.random() + Math.random() + Math.random() - 1.5) * 1.41; // ~N(0,1)
+    const a = THREE.MathUtils.degToRad(deg);
+    this._tmpVel.set(g(), g(), g()).multiplyScalar(a);
+    const ang = this._tmpVel.length();
+    if (ang > 0) this._rawQ.premultiply(this._tmpQ.setFromAxisAngle(this._tmpVel.divideScalar(ang), ang));
+    const d = this._rawP.length() * (deg / 100);
+    this._rawP.x += g() * d;
+    this._rawP.y += g() * d;
+    this._rawP.z += g() * d;
+    this._trackedMatrix.compose(this._rawP, this._rawQ, this._rawS);
   }
 
   /** Screen position (px) of a point in front of the image, for the wobble diagnostic. */
@@ -724,7 +877,13 @@ export class ImageTrackingSession {
     }
     this.anchor.matrix.compose(this._cp, this._cq, this._cs);
     this.anchor.matrixWorldNeedsUpdate = true;
-    if (TUNING.debug && exact) this.#recordWobble(this._wobble.shown, this.anchor.matrix);
+    if (TUNING.debug && exact) {
+      this.#recordWobble(this._wobble.shown, this.anchor.matrix);
+      if (frameT !== this._jerkT) {
+        this._jerkT = frameT;
+        this.#recordWobble(this._jerk, this.anchor.matrix);
+      }
+    }
     this.anchor.visible = true;
   }
 
@@ -840,6 +999,16 @@ export class ImageTrackingSession {
       this.stats.wobbleRaw = sd(this._wobble.raw);
       this.stats.wobbleShown = sd(this._wobble.shown); // what is actually drawn (incl. prediction)
       this._wobble = { raw: [], shown: [] };
+      // Jerk: RMS second difference (px) of the probe over consecutive
+      // displayed camera frames. Smooth real motion gives ~0, so this measures
+      // wobble while the camera moves.
+      const J = this._jerk;
+      let jsum = 0;
+      for (let k = 2; k < J.length; k++) {
+        jsum += (J[k][0] - 2 * J[k - 1][0] + J[k - 2][0]) ** 2 + (J[k][1] - 2 * J[k - 1][1] + J[k - 2][1]) ** 2;
+      }
+      this.stats.jerk = J.length > 2 ? +Math.sqrt(jsum / (J.length - 2)).toFixed(1) : 0;
+      this._jerk = [];
       this._trackFrames = 0;
       this._statsAt = this.clock.elapsedTime;
     }
