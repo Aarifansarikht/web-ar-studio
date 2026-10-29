@@ -85,7 +85,10 @@ export function useWebAR({ containerRef, experience, assets }) {
         if (runtime.current !== rt) return;
         if (type === 'found') {
           setStatus('tracking');
-          if (!session.fullscreen) rt.lockOn?.play();
+          // Lock-on cue on the first lock only: re-locks after a brief look
+          // away should feel continuous, not like a new scan.
+          if (!session.fullscreen && !rt.lockedOnce) rt.lockOn?.play();
+          rt.lockedOnce = true;
           playContent();
         } else {
           // Target left the view: content hidden until the artwork is seen again
@@ -161,6 +164,7 @@ export function useWebAR({ containerRef, experience, assets }) {
       if (session.isTracking) {
         setStatus('tracking');
         rt.lockOn.play();
+        rt.lockedOnce = true;
         playContent();
       } else {
         setStatus('scanning');
@@ -212,7 +216,7 @@ export function useWebAR({ containerRef, experience, assets }) {
     if (!new URLSearchParams(window.location.search).has('debug')) return undefined;
     const t = setInterval(() => {
       const s = runtime.current?.session;
-      setStats(s ? { trackFps: s.stats.trackFps, tracking: s.isTracking } : null);
+      setStats(s ? { ...s.stats, tracking: s.isTracking } : null);
     }, 500);
     return () => clearInterval(t);
   }, []);

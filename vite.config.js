@@ -9,22 +9,32 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
  *    locked when only part of it is in view (walking up close to a poster).
  *  - Widen the per-frame search radius (10 → 12 px) so faster hand movement
  *    doesn't drop the lock at the finer level.
+ *  - Detect in a 512px window instead of 256px. MindAR searches for the
+ *    target in one square window per frame, stepping through a 3×3 grid; at
+ *    256px the grid only covers the frame centre and needs up to 9 frames, so
+ *    re-finding the image after the camera moved away was slow. A 512px window
+ *    (largest power of two that fits the frame) covers the whole frame in 3.
  * Works with existing .mind files (both levels are always compiled).
- * MINDAR_TRACK_LEVEL=1 restores MindAR's default (for A/B testing).
+ * MINDAR_TRACK_LEVEL=1 restores MindAR's defaults (for A/B testing).
  */
 function mindarTrackingTuning(level) {
   const ORIGINAL = 'Z5 = 6, B5 = 1, H5 = 10, _5 = 1, U5 = 0.8, Y5 = 1,';
+  const CROP_ORIGINAL = 'let o = Math.min(t, e) / 2, r = Math.pow(2, Math.round(Math.log(o) / Math.log(2)));';
+  const CROP_TUNED = 'let o = Math.min(t, e), r = Math.pow(2, Math.floor(Math.log(o) / Math.log(2)));';
   return {
     name: 'mindar-tracking-tuning',
     enforce: 'pre',
     transform(code, id) {
       // Dev requests carry a version query (?v=…); production ids don't.
       if (!/mind-ar[\\/]dist[\\/]controller-mGt1s8dJ\.js$/.test(id.split('?')[0])) return null;
-      if (!code.includes(ORIGINAL)) {
-        throw new Error('[mindar-tracking-tuning] tracker constants not found — mind-ar version changed? Re-check the patch.');
+      if (!code.includes(ORIGINAL) || !code.includes(CROP_ORIGINAL)) {
+        throw new Error('[mindar-tracking-tuning] tracker code not found — mind-ar version changed? Re-check the patch.');
       }
-      const tuned = level === 1 ? ORIGINAL : 'Z5 = 6, B5 = 1, H5 = 12, _5 = 1, U5 = 0.8, Y5 = 0,';
-      return { code: code.replace(ORIGINAL, tuned), map: null };
+      if (level === 1) return null;
+      const tuned = code
+        .replace(ORIGINAL, 'Z5 = 6, B5 = 1, H5 = 12, _5 = 1, U5 = 0.8, Y5 = 0,')
+        .replace(CROP_ORIGINAL, CROP_TUNED);
+      return { code: tuned, map: null };
     },
   };
 }

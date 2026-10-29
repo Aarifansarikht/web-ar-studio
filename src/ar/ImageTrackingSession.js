@@ -6,18 +6,29 @@ import { loadMindAR } from './loadMindAR.js';
 let activeSession = null;
 
 const IDENTITY_QUAT = new THREE.Quaternion();
+const Z_AXIS = new THREE.Vector3(0, 0, 1);
+// Tilt stabiliser: the out-of-plane rotation (where the image plane "faces")
+// is the least observable part of a single-camera pose of a flat image, and its
+// noise makes content that sticks out of the wall wobble. It is smoothed with
+// an adaptive rate: strongly when the change is tiny (noise), fast when the
+// phone really turns. Position and in-plane rotation stay exact, so content
+// remains glued to the print.
+const TILT_STILL_DEG = 0.6;
+const TILT_MOVE_DEG = 5;
+const TILT_RATE_STILL = 4;
+const TILT_RATE_MOVE = 45;
 // The tracker analyses a downscaled copy of the camera frame (long side in px).
 // MindAR's projection is resolution-independent, so this is ~45% less work per
 // frame than 720p with no loss of alignment; the display stays at full 720p.
 const PROCESS_LONG_SIDE = 960;
 
-// Diagnostics: ?debug&minCF=…&beta=… override the pose filter for field tuning.
+// Diagnostics: ?debug&minCF=…&beta=…&proc=…&stab=0 override tracking settings for field tuning.
 const TUNING = (() => {
   if (typeof window === 'undefined') return {};
   const q = new URLSearchParams(window.location.search);
   if (!q.has('debug')) return {};
   const num = (k) => (q.has(k) && Number.isFinite(+q.get(k)) ? +q.get(k) : undefined);
-  return { minCF: num('minCF'), beta: num('beta'), processLongSide: num('proc') };
+  return { minCF: num('minCF'), beta: num('beta'), processLongSide: num('proc'), stabilise: q.get('stab') !== '0' };
 })();
 
 /**
@@ -69,7 +80,18 @@ export class ImageTrackingSession {
     this._processDone = null;
 
     // Pose state (allocated once).
-    this._trackedMatrix = new THREE.Matrix4(); // latest tracker result
+    this._trackedMatrix = new THREE.Matrix4(); // latest tracker result (stabilised)
+    this._sp = new THREE.Vector3();
+    this._sq = new THREE.Quaternion();
+    this._ss = new THREE.Vector3();
+    this._qc = new THREE.Quaternion();
+    this._nRaw = new THREE.Vector3();
+    this._nPrevRaw = new THREE.Vector3();
+    this._nStab = new THREE.Vector3();
+    this._nPrevStab = new THREE.Vector3();
+    this._stabInit = false;
+    this._stabT = 0;
+    this._jitter = { raw: 0, shown: 0, n: 0 };
     this._displayMatrix = new THREE.Matrix4(); // pose belonging to the displayed camera frame
     this._goal = new THREE.Matrix4();
     this._gp = new THREE.Vector3();
@@ -88,7 +110,7 @@ export class ImageTrackingSession {
     this._synced = false;
 
     /** Diagnostics: tracker frames processed per second. */
-    this.stats = { trackFps: 0 };
+    this.stats = { trackFps: 0, tiltJitterRaw: 0, tiltJitterShown: 0 };
     this._trackFrames = 0;
     this._statsAt = 0;
   }
@@ -244,7 +266,8 @@ export class ImageTrackingSession {
       // still; a high beta lets the pose follow instantly when it moves.
       filterMinCF: TUNING.minCF ?? 0.0005,
       filterBeta: TUNING.beta ?? 800,
-      warmupTolerance: 3,
+      // Frames needed to confirm a detection before content appears.
+      warmupTolerance: 2,
       // Frames the tracker may miss (motion blur) before the target counts as
       // lost. Kept short: content must never linger where the image isn't.
       missTolerance: 3,
@@ -281,6 +304,8 @@ export class ImageTrackingSession {
     const { worldMatrix } = data;
     if (worldMatrix) {
       this._trackedMatrix.fromArray(worldMatrix).multiply(this._postMatrix);
+      if (!this.tracking) this._stabInit = false; // first frame of a lock: no history
+      this.#stabiliseTilt(this._trackedMatrix);
       if (!this.tracking) {
         this.tracking = true;
         this._snapPose = true;
@@ -292,6 +317,37 @@ export class ImageTrackingSession {
       this.tracking = false;
       this.onTrackingChange?.({ type: 'searching' });
     }
+  }
+
+  /** Smooth only the image-plane normal (see TILT_* above), in place. */
+  #stabiliseTilt(m) {
+    m.decompose(this._sp, this._sq, this._ss);
+    this._nRaw.copy(Z_AXIS).applyQuaternion(this._sq);
+    const t = performance.now() / 1000;
+    if (!this._stabInit) {
+      this._nStab.copy(this._nRaw);
+      this._nPrevRaw.copy(this._nRaw);
+      this._nPrevStab.copy(this._nRaw);
+      this._stabInit = true;
+    } else {
+      const dt = Math.min(0.2, t - this._stabT);
+      const deg = THREE.MathUtils.radToDeg(this._nStab.angleTo(this._nRaw));
+      const f = THREE.MathUtils.smoothstep(deg, TILT_STILL_DEG, TILT_MOVE_DEG);
+      const rate = THREE.MathUtils.lerp(TILT_RATE_STILL, TILT_RATE_MOVE, f);
+      this._nStab.lerp(this._nRaw, 1 - Math.exp(-rate * dt)).normalize();
+      // diagnostics
+      const j = this._jitter;
+      j.raw += this._nPrevRaw.angleTo(this._nRaw) ** 2;
+      j.shown += this._nPrevStab.angleTo(this._nStab) ** 2;
+      j.n++;
+      this._nPrevRaw.copy(this._nRaw);
+      this._nPrevStab.copy(this._nStab);
+    }
+    this._stabT = t;
+    if (TUNING.stabilise === false) return; // ?debug&stab=0 (A/B diagnostics)
+    this._qc.setFromUnitVectors(this._nRaw, this._nStab);
+    this._sq.premultiply(this._qc);
+    m.compose(this._sp, this._sq, this._ss);
   }
 
   /* ---------------------------------------------------------------- pose */
@@ -435,6 +491,13 @@ export class ImageTrackingSession {
     this.#updatePose(dt);
     if (this.clock.elapsedTime - this._statsAt >= 1) {
       this.stats.trackFps = Math.round(this._trackFrames / (this.clock.elapsedTime - this._statsAt));
+      const j = this._jitter;
+      if (j.n) {
+        // RMS frame-to-frame change of the image-plane normal, in degrees
+        this.stats.tiltJitterRaw = +THREE.MathUtils.radToDeg(Math.sqrt(j.raw / j.n)).toFixed(2);
+        this.stats.tiltJitterShown = +THREE.MathUtils.radToDeg(Math.sqrt(j.shown / j.n)).toFixed(2);
+      }
+      this._jitter = { raw: 0, shown: 0, n: 0 };
       this._trackFrames = 0;
       this._statsAt = this.clock.elapsedTime;
     }

@@ -1,14 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Icon from '../common/Icon.jsx';
 import BrandHeader from './BrandHeader.jsx';
 import { assetUrl } from '../../utils/url.js';
 import styles from './AR.module.css';
 
-const CHIP = {
-  tracking: { label: 'Tracking', tone: 'live' },
-  searching: { label: 'Searching', tone: 'hold' },
-  fullscreen: { label: 'Full screen', tone: 'live' },
-};
+// A short loss of tracking (camera moved away briefly) must not interrupt the
+// experience: no UI reacts until the image has been out of view this long.
+const LOST_HINT_DELAY_MS = 1500;
 
 /** Overlay shown on top of the live camera view during an AR session. */
 export default function ARHud({ experience, ar, onClose }) {
@@ -19,15 +17,27 @@ export default function ARHud({ experience, ar, onClose }) {
   const active = tracking || ar.fullscreen;
   const hasHotspots = experience.hotspots?.length > 0;
   const [showTapHint, setShowTapHint] = useState(false);
-  const chip = ar.fullscreen ? CHIP.fullscreen : CHIP[status];
+  const [showLostHint, setShowLostHint] = useState(false);
+  const tapHintShown = useRef(false);
 
-  // Briefly suggest tapping hotspots the first time the target is found.
+  // Suggest tapping hotspots once per session, on the first lock only.
   useEffect(() => {
-    if (!tracking || !hasHotspots) return undefined;
+    if (!tracking || !hasHotspots || tapHintShown.current) return undefined;
+    tapHintShown.current = true;
     setShowTapHint(true);
     const t = setTimeout(() => setShowTapHint(false), 4000);
     return () => clearTimeout(t);
   }, [tracking, hasHotspots]);
+
+  // Only guide the user back after a real absence, not a brief look away.
+  useEffect(() => {
+    if (status !== 'searching') {
+      setShowLostHint(false);
+      return undefined;
+    }
+    const t = setTimeout(() => setShowLostHint(true), LOST_HINT_DELAY_MS);
+    return () => clearTimeout(t);
+  }, [status]);
 
   const aspect = experience.target.width && experience.target.height
     ? experience.target.width / experience.target.height
@@ -40,17 +50,13 @@ export default function ARHud({ experience, ar, onClose }) {
         <button className={styles.iconBtn} onClick={onClose} aria-label="Close AR and turn off camera">
           <Icon name="x" size={22} />
         </button>
-        {chip && (
-          <span key={chip.label} className={`${styles.statusChip} ${styles[chip.tone]}`} role="status">
-            <i />
-            {chip.label}
-          </span>
-        )}
       </header>
 
       {ar.stats && (
         <div className={styles.debugStats} aria-hidden="true">
           tracker {ar.stats.trackFps} fps · {ar.stats.tracking ? 'locked' : 'searching'}
+          <br />
+          tilt jitter {ar.stats.tiltJitterRaw}° → {ar.stats.tiltJitterShown}°
         </div>
       )}
 
@@ -81,7 +87,7 @@ export default function ARHud({ experience, ar, onClose }) {
             Point your camera at the image
           </p>
         )}
-        {status === 'searching' && !ar.fullscreen && (
+        {showLostHint && !ar.fullscreen && (
           <p className={styles.hint} role="status">
             <Icon name="target" size={18} />
             Point at the artwork to continue

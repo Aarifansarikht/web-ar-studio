@@ -143,13 +143,16 @@ The app uses MindAR's low-level **`Controller`** (the actual tracking engine) wi
 - **Frame-synchronised rendering (content glued to the image).** While the image is tracked, the camera picture on screen is the exact frame the tracker analysed, drawn in WebGL with the pose computed for that frame (zero-copy: MindAR's own input canvas is uploaded when the frame finishes). Content therefore cannot lag or slide relative to the print when the phone moves; the whole view is delayed by one tracker frame instead. When not tracking, the live video is shown. Measured with a simulated fast hand-pan and phone-like CPU throttling, misalignment between content and print dropped from **mean 31 px / median 35 px** (live video + smoothing) to **mean 10 px / median 3–13 px**. A static camera shows 0 px (no jitter).
 - **Faster tracking.** The tracker analyses a 960 px copy of the 720p camera frame (MindAR's projection is resolution-independent). This is about 45% less work than 720p and gave the best accuracy under fast motion in tests (vs 720 px and 1280 px).
 - **Close-up tracking (Artivive-style).** The overlay stays locked when you walk up to the artwork and only part of it fills the screen:
-  - *Tracker tuning* (Vite plugin `mindarTrackingTuning` in `vite.config.js`, MindAR pinned to 1.2.5). Tracking runs on the finer 256 px template level instead of 128 px, with a slightly wider search radius.
+  - *Tracker tuning* (Vite plugin `mindarTrackingTuning` in `vite.config.js`, MindAR pinned to 1.2.5). Tracking runs on the finer 256 px template level instead of 128 px, with a slightly wider search radius and a 512 px detection window.
   - *Higher-resolution targets*. Images are compiled at up to 2048 px so detection can re-find the target from a close-up. Result: **100% lock** through walk-in, close-up, pan and back-out.
   - Targets compiled before this change still work but should be re-uploaded (Admin → Replace target image).
+- **Stable 3D content.** The tilt of the image plane (the least observable part of a single-camera pose) is smoothed adaptively: strongly while the phone is still, fast when it really turns. Position and in-plane rotation stay exact, so content remains glued to the print without lag. The `?debug` overlay shows tilt jitter, raw → displayed.
+- **Faster re-acquisition.** MindAR searches for the image in one square window per frame. The build-time tuning widens it from 256 px (centre only, 9 frames to cover) to 512 px (whole frame in 3 frames).
+- **Seamless re-locks.** After the first lock, briefly losing and re-finding the image changes nothing in the UI: no repeated lock-on cue, no status chips. The "Point at the artwork" hint appears only after 1.5 s without the image.
 - **Content only appears on the image.** If the image leaves the view, the content hides immediately and a small "Point at the artwork" hint shows (no scan screen). The tracker itself bridges up to 3 missed frames (motion blur). Content is never held or floated where the image isn't.
 - **Lock-on cue.** Accent corner brackets snap onto the target when it is recognised.
 - **Manual full screen.** The expand button shows the content full screen at any time; tap again to return to the AR view.
-- **Diagnostics.** Add `?debug` to an AR link to show the tracker frame rate. For field tuning you can also add `&minCF=…&beta=…` (pose filter) and `&proc=…` (analysis resolution).
+- **Diagnostics.** Add `?debug` to an AR link to show the tracker frame rate. For field tuning you can also add `&minCF=…&beta=…` (pose filter), `&proc=…` (analysis resolution) and `&stab=0` (disable tilt stabilisation).
 
 ### Layered 3D scenes (artwork stays on the wall)
 
