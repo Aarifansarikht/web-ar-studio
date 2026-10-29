@@ -26,12 +26,19 @@ const RATE_MOVE = 40;
 // tracker input (px), back to the stable 128px level below the exit size.
 const FINE_ENTER_PX = 210;
 const FINE_EXIT_PX = 170;
-// Motion prediction. The live camera is shown at full frame rate; each tracker
-// result describes a frame that is already some tens of ms old, so the pose is
-// extrapolated with the measured velocity to the moment of display. Capped so
-// a missed frame can never send content flying.
+// Delayed, frame-exact display (see class comment). Every camera frame is kept
+// on the GPU in a small ring; the view plays them back slightly delayed, and
+// each frame's content pose is interpolated between the tracker results just
+// before and after it. The delay adapts to the tracker's speed on the device.
+const FRAME_RING_SIZE = 12;
+const MAX_DELAY_S = 0.3;
+const MIN_DELAY_S = 0.03;
+const DELAY_MARGIN_S = 0.012;
+// Extrapolation is only a fallback (tracker hiccup, or browsers without
+// requestVideoFrameCallback): capped so content can never fly off.
 const MAX_PREDICT_S = 0.12;
 const VELOCITY_SMOOTHING = 0.55; // weight of the newest velocity sample
+const POSE_HISTORY = 40;
 // Point used for the wobble diagnostic: 0.15 image widths in front of the centre.
 const WOBBLE_PROBE = new THREE.Vector3(0, 0, 0.15);
 // The tracker analyses a downscaled copy of the camera frame (long side in px).
@@ -51,10 +58,9 @@ const TUNING = (() => {
     beta: num('beta'),
     processLongSide: num('proc'),
     stabilise: q.get('stab') !== '0',
-    // &sync=1: show only tracker-analysed frames (perfect alignment, choppy at low tracker fps).
-    sync: q.get('sync') === '1',
+    // &live=1: show the live camera with extrapolated poses (the fallback mode).
+    live: q.get('live') === '1',
     predict: q.get('predict') !== '0',
-    maxPredict: num('maxp'),
   };
 })();
 
@@ -66,12 +72,13 @@ const TUNING = (() => {
  *   - +X right, +Y up, +Z out of the image towards the viewer
  *   - 1 unit = the target image's width (height = targetHeight / targetWidth)
  *
- * Smooth rendering: the live camera video is always shown at its full frame
- * rate, independent of how fast the tracker runs on the device. The content
- * pose from each tracker frame is extrapolated (velocity prediction) to the
- * moment of display, so content keeps up with the image while the phone moves.
- * (A frame-synchronised mode, which shows only tracker-analysed frames, is
- * kept for diagnostics: ?debug&sync=1.)
+ * Smooth and glued: every camera frame is copied to the GPU as it arrives
+ * (requestVideoFrameCallback) and the view plays the frames back at full camera
+ * frame rate, delayed by just enough for the tracker to have analysed a later
+ * frame. Each displayed frame gets the pose interpolated between the tracker
+ * results around it, so content stays fixed to the printed image while the
+ * phone moves, even when the tracker runs slower than the camera. Without
+ * requestVideoFrameCallback, the live video is shown with extrapolated poses.
  */
 export class ImageTrackingSession {
   /**
@@ -118,7 +125,6 @@ export class ImageTrackingSession {
     this._stabInit = false;
     this._stabT = 0;
     this._wobble = { raw: [], shown: [] };
-    this._displayMatrix = new THREE.Matrix4(); // pose belonging to the displayed camera frame
     this._goal = new THREE.Matrix4();
     this._gp = new THREE.Vector3();
     this._gq = new THREE.Quaternion();
@@ -144,12 +150,19 @@ export class ImageTrackingSession {
     this._tmpVel = new THREE.Vector3();
     this._tmpQ = new THREE.Quaternion();
 
-    // Frame sync state.
-    this._hasSyncedFrame = false;
-    this._synced = false;
+    // Delayed display state: ring of camera frames ({rt, t}) and tracked poses
+    // ({t, seg, p, q, s}, stabilised), keyed by camera frame time (seconds).
+    this._frames = [];
+    this._poses = [];
+    this._seg = 0;
+    this._delay = 0.1;
+    this._snapT = 0;
+    this._delayed = false;
+    this._shownT = 0;
+    this._viewFrames = 0;
 
     /** Diagnostics: tracker frames processed per second. */
-    this.stats = { trackFps: 0, wobbleRaw: 0, wobbleShown: 0, trackLevel: 'coarse' };
+    this.stats = { trackFps: 0, wobbleRaw: 0, wobbleShown: 0, trackLevel: 'coarse', delayMs: 0 };
     this._trackFrames = 0;
     this._statsAt = 0;
   }
@@ -256,36 +269,74 @@ export class ImageTrackingSession {
   /* ---------------------------------------------------------------- camera frames */
 
   #createCameraBackground() {
-    this.bgScene = new THREE.Scene();
+    // Raw pixel copies (no colour conversion, no tone mapping) so the camera
+    // image on screen is identical to the video.
+    const vertexShader = `
+      uniform vec4 uCrop;
+      varying vec2 vUv;
+      void main() { vUv = uv * uCrop.xy + uCrop.zw; gl_Position = vec4(position.xy, 0.0, 1.0); }`;
+    const fragmentShader = `
+      uniform sampler2D map;
+      varying vec2 vUv;
+      void main() { gl_FragColor = texture2D(map, vUv); }`;
+    const quad = (map, crop) =>
+      new THREE.Mesh(
+        new THREE.PlaneGeometry(2, 2),
+        new THREE.ShaderMaterial({
+          uniforms: { map: { value: map }, uCrop: { value: crop } },
+          vertexShader,
+          fragmentShader,
+          depthTest: false,
+          depthWrite: false,
+        }),
+      );
     this.bgCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    this.bgTexture = new THREE.CanvasTexture(document.createElement('canvas'));
-    this.bgTexture.colorSpace = THREE.SRGBColorSpace;
-    this.bgTexture.minFilter = THREE.LinearFilter;
-    this.bgTexture.generateMipmaps = false;
-    const material = new THREE.MeshBasicMaterial({ map: this.bgTexture, depthTest: false, depthWrite: false, toneMapped: false });
-    this.bgMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+    // Display: one buffered camera frame, cover-cropped like the <video>.
+    this.bgScene = new THREE.Scene();
+    this.bgMesh = quad(null, new THREE.Vector4(1, 1, 0, 0));
     this.bgScene.add(this.bgMesh);
+    // Capture: the current video frame, copied 1:1 into a ring slot.
+    this.videoTexture = new THREE.Texture(this.video);
+    this.videoTexture.colorSpace = THREE.NoColorSpace;
+    this.videoTexture.minFilter = THREE.LinearFilter;
+    this.videoTexture.generateMipmaps = false;
+    this.copyScene = new THREE.Scene();
+    this.copyMesh = quad(this.videoTexture, new THREE.Vector4(1, 1, 0, 0));
+    this.copyScene.add(this.copyMesh);
   }
 
-  /**
-   * Tracker finished a frame: show that exact frame together with its pose.
-   * MindAR draws every analysed frame (RGB, at the tracker input size) into its
-   * input canvas; we display that canvas and upload it to the GPU right now,
-   * before the next frame overwrites it. No extra copies of the video.
-   */
-  #promoteFrame(tracked) {
-    // Tracker missed this frame (fast motion/blur) but still reports its last
-    // pose for up to missTolerance frames: pairing that stale pose with a new
-    // camera frame would make content slip off the image. Keep showing the last
-    // tracked frame and its pose instead (a brief hold, already on the GPU).
-    if (this.tracking && !tracked && this._hasSyncedFrame) return;
-    const canvas = this.controller?.inputLoader?.context?.canvas;
-    if (!canvas || !this.renderer) return;
-    if (this.bgTexture.image !== canvas) this.bgTexture.image = canvas;
-    this.bgTexture.needsUpdate = true;
-    this.renderer.initTexture(this.bgTexture);
-    this._hasSyncedFrame = true;
-    if (this.tracking) this._displayMatrix.copy(this._trackedMatrix);
+  /** Copy the current camera frame into the ring (called once per new video frame). */
+  #captureFrame(t, source) {
+    const { renderer, video } = this;
+    if (!renderer || !video.videoWidth) return;
+    let slot;
+    if (this._frames.length >= FRAME_RING_SIZE) {
+      slot = this._frames.shift();
+    } else {
+      slot = {
+        rt: new THREE.WebGLRenderTarget(source.width, source.height, {
+          depthBuffer: false,
+          stencilBuffer: false,
+          generateMipmaps: false,
+          minFilter: THREE.LinearFilter,
+          magFilter: THREE.LinearFilter,
+        }),
+        t: 0,
+      };
+    }
+    if (this.videoTexture.image !== source) this.videoTexture.image = source;
+    this.videoTexture.needsUpdate = true;
+    const prev = renderer.getRenderTarget();
+    renderer.setRenderTarget(slot.rt);
+    renderer.render(this.copyScene, this.bgCamera);
+    renderer.setRenderTarget(prev);
+    slot.t = t;
+    this._frames.push(slot);
+  }
+
+  #disposeFrames() {
+    for (const f of this._frames) f.rt.dispose();
+    this._frames = [];
   }
 
   /* ---------------------------------------------------------------- tracker */
@@ -323,13 +374,32 @@ export class ImageTrackingSession {
     if (!dimensions?.length) {
       throw new ARError('engine', 'The image target data is invalid or was compiled with an incompatible version.');
     }
-    // Timestamp each analysed camera frame (for motion prediction).
+    // Every analysed camera frame is tagged with its capture time, so its pose
+    // can be paired with exactly that frame on screen.
     const loader = this.controller.inputLoader;
     const loadInput = loader.loadInput.bind(loader);
     let freshFrame = true;
+    this._delayed = typeof video.requestVideoFrameCallback === 'function' && !TUNING.live;
+    // Delayed mode: one full-resolution snapshot per camera frame feeds both
+    // the display ring and (downscaled) the tracker, so the frame on screen is
+    // guaranteed to be the frame its pose was computed from. (Uploading the
+    // <video> to WebGL directly can deliver a different frame than drawImage
+    // in the same callback; measured: tens of px of content slip.)
+    const full = document.createElement('canvas');
+    full.width = video.videoWidth;
+    full.height = video.videoHeight;
+    const fullCtx = full.getContext('2d', { alpha: false });
+    const snap = document.createElement('canvas');
+    snap.width = inputWidth;
+    snap.height = inputHeight;
+    const snapCtx = snap.getContext('2d', { alpha: false });
     loader.loadInput = (v) => {
-      this._inputT = performance.now() / 1000;
       freshFrame = false;
+      if (this._delayed && this._snapT) {
+        this._inputT = this._snapT;
+        return loadInput(snap);
+      }
+      this._inputT = performance.now() / 1000;
       return loadInput(v);
     };
     // Start the next tracking step as soon as the camera has a new frame
@@ -340,6 +410,13 @@ export class ImageTrackingSession {
       const controller = this.controller;
       const onVideoFrame = () => {
         if (this.stopped || this.controller !== controller) return; // rebuilt or stopped
+        if (this._delayed) {
+          const t = performance.now() / 1000;
+          fullCtx.drawImage(video, 0, 0, full.width, full.height);
+          snapCtx.drawImage(full, 0, 0, inputWidth, inputHeight);
+          this._snapT = t;
+          this.#captureFrame(t, full);
+        }
         freshFrame = true;
         if (waiter) {
           const w = waiter;
@@ -430,7 +507,6 @@ export class ImageTrackingSession {
   #onControllerUpdate(data) {
     if (data.type === 'processDone') {
       this._trackFrames++;
-      if (TUNING.sync) this.#promoteFrame(this._frameTracked);
       this._frameTracked = false;
       this._processDone?.();
       return;
@@ -443,9 +519,13 @@ export class ImageTrackingSession {
       // from the last real measurement instead of treating it as "stopped".
       if (this.tracking && !this._frameTracked) return;
       this._trackedMatrix.fromArray(worldMatrix).multiply(this._postMatrix);
-      if (!this.tracking) this._stabInit = false; // first frame of a lock: no history
+      if (!this.tracking) {
+        this._stabInit = false; // first frame of a lock: no history
+        this._seg++;
+      }
       this.#stabilisePose(this._trackedMatrix);
       this.#updatePrediction(this.tracking);
+      this.#recordPose();
       if (!this.tracking) {
         this.tracking = true;
         this._snapPose = true;
@@ -468,7 +548,7 @@ export class ImageTrackingSession {
       const log = (window.__webarPoseLog ??= []);
       if (log.length < 5000) log.push({ t: performance.now(), p: this._sp.toArray(), q: this._sq.toArray() });
     }
-    const t = performance.now() / 1000;
+    const t = this._inputT || performance.now() / 1000; // camera frame time
     if (!this._stabInit) {
       this._pS.copy(this._sp);
       this._qS.copy(this._sq);
@@ -522,17 +602,66 @@ export class ImageTrackingSession {
     this._hasPred = true;
   }
 
-  /** Tracked pose extrapolated to now (the camera frame currently on screen). */
-  #predictedMatrix(out) {
-    const h = TUNING.predict === false ? 0 : Math.min(TUNING.maxPredict ?? MAX_PREDICT_S, Math.max(0, performance.now() / 1000 - this._predT));
-    this._gp.copy(this._predP).addScaledVector(this._vel, h);
-    const w = this._angVel.length();
-    this._gq.copy(this._predQ);
-    if (w * h > 1e-6) {
-      this._tmpVel.copy(this._angVel).divideScalar(w);
-      this._gq.premultiply(this._tmpQ.setFromAxisAngle(this._tmpVel, w * h));
+  /**
+   * Store the (stabilised) pose of the frame just tracked, and adapt the
+   * display delay: a frame can only be shown once a tracker result at or after
+   * it exists, i.e. the delay must cover the time from one tracked frame's
+   * capture to the arrival of the next result. Rises fast, decays slowly.
+   */
+  #recordPose() {
+    const P = this._poses;
+    const t = this._inputT;
+    const last = P[P.length - 1];
+    if (last && t <= last.t) return; // same frame reported twice
+    const now = performance.now() / 1000;
+    if (last && last.seg === this._seg) {
+      const need = Math.min(MAX_DELAY_S, now - last.t + DELAY_MARGIN_S);
+      this._delay += (need - this._delay) * (need > this._delay ? 0.5 : 0.02);
+      this._delay = Math.max(MIN_DELAY_S, this._delay);
     }
-    return out.compose(this._gp, this._gq, this._predS);
+    const entry = P.length >= POSE_HISTORY ? P.shift() : { p: new THREE.Vector3(), q: new THREE.Quaternion(), s: new THREE.Vector3() };
+    entry.t = t;
+    entry.seg = this._seg;
+    entry.p.copy(this._predP);
+    entry.q.copy(this._predQ);
+    entry.s.copy(this._predS);
+    P.push(entry);
+  }
+
+  /**
+   * Content pose for the camera frame captured at time t: interpolated between
+   * the tracked frames around it; extrapolated briefly past the newest result
+   * while tracking continues. Returns false when the image was not tracked in
+   * that frame (content must not be shown there).
+   */
+  #poseAt(t, out) {
+    const P = this._poses;
+    if (!P.length || t < P[0].t - 0.002) return false;
+    const last = P[P.length - 1];
+    if (t >= last.t) {
+      if (last.seg !== this._seg || (!this.tracking && t > last.t + 0.002)) return false;
+      const h = TUNING.predict === false ? 0 : Math.min(MAX_PREDICT_S, t - last.t);
+      this._gp.copy(last.p).addScaledVector(this._vel, h);
+      this._gq.copy(last.q);
+      const w = this._angVel.length();
+      if (w * h > 1e-6) {
+        this._tmpVel.copy(this._angVel).divideScalar(w);
+        this._gq.premultiply(this._tmpQ.setFromAxisAngle(this._tmpVel, w * h));
+      }
+      out.compose(this._gp, this._gq, last.s);
+      return true;
+    }
+    let i = P.length - 2;
+    while (i > 0 && P[i].t > t) i--;
+    const a = P[i];
+    const b = P[i + 1];
+    if (a.seg !== b.seg) return false; // image was lost between these frames
+    const f = b.t > a.t ? THREE.MathUtils.clamp((t - a.t) / (b.t - a.t), 0, 1) : 1;
+    this._gp.lerpVectors(a.p, b.p, f);
+    this._gq.slerpQuaternions(a.q, b.q, f);
+    this._gs.lerpVectors(a.s, b.s, f);
+    out.compose(this._gp, this._gq, this._gs);
+    return true;
   }
 
   /** Screen position (px) of a point in front of the image, for the wobble diagnostic. */
@@ -564,15 +693,15 @@ export class ImageTrackingSession {
     return this._goal.compose(this._tmpPos.set(0, 0, -dist), IDENTITY_QUAT, this._tmpScale.setScalar(this.targetWidth));
   }
 
-  #updatePose(dt) {
+  /** @param {number} frameT capture time of the camera frame on screen (s). */
+  #updatePose(dt, frameT) {
     let goal;
     let exact = false;
     if (this.fullscreen) {
       goal = this.#fullscreenMatrix();
-    } else if (this.tracking) {
-      // Live video: tracked pose predicted to now. Synced (diagnostic): the
-      // pose of the exact frame on screen. Neither is smoothed again here.
-      goal = this._synced ? this._goal.copy(this._displayMatrix) : this.#predictedMatrix(this._goal);
+    } else if (this.#poseAt(frameT, this._goal)) {
+      // The pose of exactly the frame on screen; not smoothed again here.
+      goal = this._goal;
       exact = true;
     } else {
       this.anchor.visible = false;
@@ -611,6 +740,9 @@ export class ImageTrackingSession {
     }
     await this.#disposeController();
     if (this.stopped) return;
+    this.#disposeFrames(); // new frame size
+    this._poses = [];
+    this._snapT = 0;
     if (this.tracking) {
       this.tracking = false;
       this.onTrackingChange?.({ type: 'searching' });
@@ -666,8 +798,7 @@ export class ImageTrackingSession {
     // Same cover crop for the WebGL camera background.
     const rx = cw / vw;
     const ry = ch / vh;
-    this.bgTexture.repeat.set(rx, ry);
-    this.bgTexture.offset.set((1 - rx) / 2, (1 - ry) / 2);
+    this.bgMesh.material.uniforms.uCrop.value.set(rx, ry, (1 - rx) / 2, (1 - ry) / 2);
 
     renderer.setSize(cw, ch, true);
   }
@@ -675,16 +806,28 @@ export class ImageTrackingSession {
   #render() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
 
-    // Live video at full frame rate (synced display only in the ?debug&sync=1 diagnostic mode).
-    const synced = TUNING.sync === true && this.tracking && !this.fullscreen && this._hasSyncedFrame;
-    if (synced !== this._synced) {
-      this._synced = synced;
-      if (this.video) this.video.style.opacity = synced ? '0' : '1';
+    // Delayed mode: show the newest buffered camera frame that is at least
+    // `delay` old (the tracker has analysed a frame at or after it by then).
+    // Otherwise the live <video> under the canvas is visible.
+    const now = performance.now() / 1000;
+    let frame = null;
+    if (this._delayed && this._frames.length) {
+      const target = now - this._delay;
+      frame = this._frames[0];
+      for (const f of this._frames) if (f.t <= target) frame = f;
+      this.bgMesh.material.uniforms.map.value = frame.rt.texture;
+    }
+    this.stats.delayMs = frame ? Math.round((now - frame.t) * 1000) : 0;
+    if (frame && frame.t !== this._shownT) {
+      this._shownT = frame.t;
+      this._viewFrames++;
     }
 
-    this.#updatePose(dt);
+    this.#updatePose(dt, frame ? frame.t : now);
     if (this.clock.elapsedTime - this._statsAt >= 1) {
       this.stats.trackFps = Math.round(this._trackFrames / (this.clock.elapsedTime - this._statsAt));
+      this.stats.viewFps = Math.round(this._viewFrames / (this.clock.elapsedTime - this._statsAt));
+      this._viewFrames = 0;
       // Wobble: standard deviation (px) of a point in front of the image over the
       // last second. With the phone held still, this is pure tracking noise.
       const sd = (pts) => {
@@ -704,7 +847,7 @@ export class ImageTrackingSession {
 
     const r = this.renderer;
     r.clear();
-    if (this._synced) r.render(this.bgScene, this.bgCamera);
+    if (frame) r.render(this.bgScene, this.bgCamera);
     r.render(this.scene, this.camera);
   }
 
@@ -761,9 +904,12 @@ export class ImageTrackingSession {
       this.video = null;
     }
 
-    this.bgMesh?.geometry.dispose();
-    this.bgMesh?.material.dispose();
-    this.bgTexture?.dispose();
+    this.#disposeFrames();
+    for (const mesh of [this.bgMesh, this.copyMesh]) {
+      mesh?.geometry.dispose();
+      mesh?.material.dispose();
+    }
+    this.videoTexture?.dispose();
 
     if (this.renderer) {
       this.renderer.dispose();

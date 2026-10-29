@@ -49,7 +49,7 @@ export default function ARHud({ experience, ar, onClose }) {
 
       {ar.stats && (
         <div className={styles.debugStats} aria-hidden="true">
-          tracker {ar.stats.trackFps} fps · {ar.stats.tracking ? 'locked' : 'searching'}
+          tracker {ar.stats.trackFps} fps · {ar.stats.tracking ? 'locked' : 'searching'} · view {ar.stats.viewFps ?? '–'} fps, delay {ar.stats.delayMs} ms
           <br />
           wobble {ar.stats.wobbleRaw}px → {ar.stats.wobbleShown}px · {ar.stats.trackLevel}
         </div>
