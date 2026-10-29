@@ -50,9 +50,11 @@ function makeLabelTexture(text, accent) {
  * Positions are normalised (0..1) from the target's top-left corner.
  */
 export class HotspotLayer {
-  /** @param {{hotspots: Array, targetAspect: number, accentColor?: string, alwaysShowLabels?: boolean}} opts */
-  constructor({ hotspots, targetAspect, accentColor = '#e5173f', alwaysShowLabels = false }) {
+  /** @param {{hotspots: Array, targetAspect: number, accentColor?: string, alwaysShowLabels?: boolean, depthScale?: number}} opts */
+  constructor({ hotspots, targetAspect, accentColor = '#e5173f', alwaysShowLabels = false, depthScale = 1 }) {
     this.alwaysShowLabels = alwaysShowLabels;
+    // Hotspot depths follow the model's depth compression (content.depth).
+    this.depthScale = depthScale;
     this.group = new THREE.Group();
     this.group.name = 'hotspots';
     this.items = [];
@@ -75,7 +77,7 @@ export class HotspotLayer {
 
   #add(h) {
     const root = new THREE.Group();
-    root.position.set(h.x - 0.5, (0.5 - h.y) * this.targetAspect, HOTSPOT_Z + (h.z ?? 0));
+    root.position.set(h.x - 0.5, (0.5 - h.y) * this.targetAspect, HOTSPOT_Z + (h.z ?? 0) * this.depthScale);
     root.scale.setScalar(this.sizeScale);
     root.userData.hotspotId = h.id;
 

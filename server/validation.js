@@ -74,6 +74,8 @@ export function sanitizeExperienceInput(input, previous = null) {
     playAnimations: bool(contentIn.playAnimations, true),
     // Model authored in target space (no auto-fit), for scenes that line up with the print.
     alignToTarget: bool(contentIn.alignToTarget, false),
+    // 3D depth (1 = as authored; lower = flatter and steadier on the print).
+    depth: num(contentIn.depth, 0.05, 1, previous?.content?.depth ?? 1),
     aspect: num(contentIn.aspect, 0.05, 20, previous?.content?.aspect ?? 1),
   };
 

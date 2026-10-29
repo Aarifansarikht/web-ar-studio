@@ -46,6 +46,7 @@ export function createEmptyDraft() {
       startMuted: true,
       playAnimations: true,
       alignToTarget: false,
+      depth: 1,
       aspect: 1,
     },
     placement: { ...DEFAULT_PLACEMENT },

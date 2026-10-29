@@ -5,6 +5,11 @@ import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 const deg = THREE.MathUtils.degToRad;
+
+/** Depth compression for 3D models (content.depth, 0.05–1; 1 = as authored). */
+export function modelDepth(content) {
+  return content?.type === 'model' && Number.isFinite(content.depth) ? THREE.MathUtils.clamp(content.depth, 0.05, 1) : 1;
+}
 const easeOut = (t) => 1 - Math.pow(1 - t, 3);
 
 /** Neutral studio lighting for PBR models. Returns a dispose function. */
@@ -241,6 +246,11 @@ export async function createARContent({ content, placement, targetAspect, url, m
       baseVisualScale = 1 / maxDim;
       visual.scale.setScalar(baseVisualScale * 0.6);
     }
+    // Depth (1 = as authored): compresses the model towards the image plane.
+    // Seen from the front it looks the same, but parts sticking out of the
+    // wall shift far less against the print when the camera moves (parallax),
+    // and tracking noise is magnified less, so the model feels fixed in place.
+    visual.scale.z *= modelDepth(content);
     root.add(visual);
 
     // Unlit layers (wall patches, glows, streaks) keep the artwork's exact

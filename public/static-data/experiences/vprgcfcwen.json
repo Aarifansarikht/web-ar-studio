@@ -18,7 +18,8 @@
     "startMuted": true,
     "playAnimations": true,
     "alignToTarget": true,
-    "aspect": 1
+    "aspect": 1,
+    "depth": 0.25
   },
   "placement": {
     "scale": 1,

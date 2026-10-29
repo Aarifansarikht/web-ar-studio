@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ImageTrackingSession } from '../ar/ImageTrackingSession.js';
 import { ARError, detectARSupportIssue } from '../ar/environment.js';
-import { addModelLighting, createARContent } from '../ar/content.js';
+import { addModelLighting, createARContent, modelDepth } from '../ar/content.js';
 import { HotspotLayer } from '../ar/hotspots.js';
 import { LockOnFrame } from '../ar/lockOn.js';
 
@@ -150,6 +150,7 @@ export function useWebAR({ containerRef, experience, assets }) {
           hotspots: experience.hotspots,
           targetAspect: session.targetAspect,
           accentColor: experience.brand?.accentColor,
+          depthScale: modelDepth(experience.content),
         });
         session.anchor.add(rt.hotspots.group);
       }

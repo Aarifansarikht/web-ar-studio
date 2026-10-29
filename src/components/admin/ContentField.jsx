@@ -111,6 +111,26 @@ export default function ContentField({ content, file, savedFileName, onChange, o
             </label>
           </div>
         )}
+        {content.type === 'model' && (
+          <div className="field">
+            <label className="label" htmlFor="depth">
+              3D depth: {Math.round((content.depth ?? 1) * 100)}%
+            </label>
+            <input
+              id="depth"
+              type="range"
+              min={0.05}
+              max={1}
+              step={0.05}
+              value={content.depth ?? 1}
+              onChange={(e) => onChange({ depth: Number(e.target.value) })}
+            />
+            <p className="hint">
+              Lower values press the model flatter onto the image. It looks the same from the front, but stays
+              fixed on the print when the camera moves.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

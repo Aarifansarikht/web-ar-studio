@@ -157,7 +157,7 @@ The app uses MindAR's low-level **`Controller`** (the actual tracking engine) wi
 - **Content only appears on the image.** If the image leaves the view, the content hides immediately and a small "Point at the artwork" hint shows (no scan screen). The tracker itself bridges up to 3 missed frames (motion blur). Content is never held or floated where the image isn't.
 - **Lock-on cue.** Accent corner brackets snap onto the target when it is recognised.
 - **Manual full screen.** The expand button shows the content full screen at any time; tap again to return to the AR view.
-- **Diagnostics.** Add `?debug` to an AR link to show the tracker frame rate. For field tuning you can also add `&minCF=…&beta=…` (pose filter), `&proc=…` (analysis resolution) and `&stab=0` (disable pose stabilisation).
+- **Diagnostics.** Add `?debug` to an AR link to show the tracker frame rate. For field tuning you can also add `&minCF=…&beta=…` (pose filter), `&proc=…` (analysis resolution) and `&stab=0` (disable pose stabilisation) and `&live=1` (live video with pose prediction instead of the delayed frame-exact view).
 
 ### Layered 3D scenes (artwork stays on the wall)
 
@@ -167,8 +167,9 @@ For the most convincing effect, don't cover the whole print with a flat video. L
 - Animation clips named `intro` play once when the image is first recognised (e.g. an element lifting off the wall). A clip named `loop` repeats. Other GLBs play their first clip.
 - Unlit (`KHR_materials_unlit`) materials keep the artwork's exact colours. Use them for wall patches, glows and light effects. Lit (PBR) materials get studio lighting and filmic tone mapping.
 - Hotspots accept an optional `z` (height above the image, in image widths), so markers can sit on 3D parts.
+- **3D depth** (admin slider, `content.depth`, 5–100%) presses the model towards the wall. Seen from the front it looks the same, but anything standing out of the wall shifts against the print as the camera moves (parallax) and magnifies tracking noise in proportion to its height. At 25% the CEAT tyre tread stands about 0.055 image widths out instead of 0.22, so it moves 4× less against its printed spot and feels fixed in place. Hotspot `z` values are scaled with it.
 
-The CEAT demo (`demo-assets/ceat/ceat-ar-scene.glb`) is built this way. It contains a feathered clean patch that hides the printed tyre, the same 3D tyre (PBR) lifting 0.1 image widths off the wall and spinning, a contact shadow, a glow, and light streaks. It is about 54k triangles, 2.1 MB, and was validated with Blender's glTF importer.
+The CEAT demo (`demo-assets/ceat/ceat-ar-scene.glb`) is built this way. It contains a feathered clean patch that hides the printed tyre, the same 3D tyre (PBR) lifting off the wall and spinning (shown at 25% depth), a contact shadow, a glow, and light streaks. It is about 54k triangles, 2.1 MB, and was validated with Blender's glTF importer.
 
 ### AR content
 

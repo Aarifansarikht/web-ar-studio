@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { addModelLighting, createARContent } from '../../ar/content.js';
+import { addModelLighting, createARContent, modelDepth } from '../../ar/content.js';
 import { HotspotLayer } from '../../ar/hotspots.js';
 import styles from './ExperienceForm.module.css';
 
@@ -106,7 +106,7 @@ export default function PlacementPreview({ targetUrl, targetAspect, content, con
   }, [targetUrl, targetAspect]);
 
   // Content (rebuilt only when the asset or its geometry-affecting options change).
-  const { type, fit, loop, playAnimations } = content;
+  const { type, fit, loop, playAnimations, alignToTarget, depth } = content;
   useEffect(() => {
     const c = ctx.current;
     if (!c || !contentUrl) return undefined;
@@ -115,7 +115,7 @@ export default function PlacementPreview({ targetUrl, targetAspect, content, con
     setStatus('loading');
     setError('');
     createARContent({
-      content: { type, fit, loop, startMuted: true, playAnimations },
+      content: { type, fit, loop, startMuted: true, playAnimations, alignToTarget, depth },
       placement: placementRef.current,
       targetAspect,
       url: contentUrl,
@@ -141,7 +141,7 @@ export default function PlacementPreview({ targetUrl, targetAspect, content, con
         if (c.content === built) c.content = null;
       }
     };
-  }, [contentUrl, type, fit, loop, playAnimations, targetAspect]);
+  }, [contentUrl, type, fit, loop, playAnimations, alignToTarget, depth, targetAspect]);
 
   // Placement is applied live without rebuilding.
   useEffect(() => {
@@ -152,14 +152,20 @@ export default function PlacementPreview({ targetUrl, targetAspect, content, con
   useEffect(() => {
     const c = ctx.current;
     if (!c) return undefined;
-    const layer = new HotspotLayer({ hotspots, targetAspect, accentColor, alwaysShowLabels: true });
+    const layer = new HotspotLayer({
+      hotspots,
+      targetAspect,
+      accentColor,
+      alwaysShowLabels: true,
+      depthScale: modelDepth({ type, depth }),
+    });
     c.anchor.add(layer.group);
     c.hotspots = layer;
     return () => {
       layer.dispose();
       if (c.hotspots === layer) c.hotspots = null;
     };
-  }, [hotspots, targetAspect, accentColor]);
+  }, [hotspots, targetAspect, accentColor, type, depth]);
 
   return (
     <div className={styles.preview}>
