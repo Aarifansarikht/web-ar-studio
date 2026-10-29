@@ -71,6 +71,10 @@ export class ImageTrackingSession {
     this._orientation = null;
     this._snapPose = false;
     this._blendUntil = 0;
+    /** Diagnostics: tracker frames processed per second. */
+    this.stats = { trackFps: 0 };
+    this._trackFrames = 0;
+    this._statsAt = 0;
   }
 
   /** True while the image is actually being tracked by the camera. */
@@ -212,6 +216,7 @@ export class ImageTrackingSession {
 
   #onControllerUpdate(data) {
     if (data.type === 'processDone') {
+      this._trackFrames++;
       this._processDone?.();
       return;
     }
@@ -451,6 +456,11 @@ export class ImageTrackingSession {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     this.#updatePose(dt);
     this.#checkAutoFullscreen();
+    if (this.clock.elapsedTime - this._statsAt >= 1) {
+      this.stats.trackFps = Math.round(this._trackFrames / (this.clock.elapsedTime - this._statsAt));
+      this._trackFrames = 0;
+      this._statsAt = this.clock.elapsedTime;
+    }
     this.onFrame?.(dt, this.clock.elapsedTime);
     this.renderer.render(this.scene, this.camera);
   }

@@ -11,9 +11,12 @@ export const TARGET_ACCEPT = '.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/w
 const TARGET_TYPES = ['image/jpeg', 'image/png', 'image/webp'];
 const MAX_TARGET_BYTES = 15 * 1024 * 1024;
 const MIN_SIDE = 300;
-// Larger images compile slowly without improving tracking (MindAR tracks on a
-// 256px pyramid level); this also keeps the .mind file small.
-const MAX_COMPILE_SIDE = 1024;
+// Detection keypoints are extracted from every pyramid level of the compiled
+// image, so a higher resolution lets the camera re-find the target when it is
+// close and only partly in view (A/B test: lock while backing out of a
+// close-up 15% → 90% going from 1024px to 1800px). Tracking itself always
+// uses fixed 256/128px levels. ~5 s compile, ~0.6 MB .mind for a poster.
+const MAX_COMPILE_SIDE = 2048;
 
 export class TargetError extends Error {}
 

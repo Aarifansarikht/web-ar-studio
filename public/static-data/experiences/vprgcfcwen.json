@@ -55,13 +55,13 @@
     }
   ],
   "target": {
-    "imageUrl": "/uploads/vprgcfcwen/target-ccb4b689d6.jpg",
-    "mindUrl": "/uploads/vprgcfcwen/target-7c639a4ebd.mind",
-    "width": 1024,
-    "height": 569,
+    "imageUrl": "/uploads/vprgcfcwen/target-903e236c7f.jpg",
+    "mindUrl": "/uploads/vprgcfcwen/target-978a62781a.mind",
+    "width": 1800,
+    "height": 1000,
     "quality": "good",
-    "featureCount": 1744
+    "featureCount": 2466
   },
   "createdAt": "2026-10-28T12:20:02.900Z",
-  "updatedAt": "2026-10-28T12:20:02.900Z"
+  "updatedAt": "2026-10-29T05:12:16.324Z"
 }

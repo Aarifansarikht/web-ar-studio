@@ -25,6 +25,7 @@ export function useWebAR({ containerRef, experience, assets }) {
   const [muted, setMuted] = useState(true);
   const [activeHotspot, setActiveHotspot] = useState(null);
   const [fullscreen, setFullscreenState] = useState(false);
+  const [stats, setStats] = useState(null);
 
   const runtime = useRef(null);
   const startingRef = useRef(false);
@@ -208,6 +209,16 @@ export function useWebAR({ containerRef, experience, assets }) {
     }
   }, []);
 
+  // Diagnostics overlay (?debug in the URL): tracker frame rate.
+  useEffect(() => {
+    if (!new URLSearchParams(window.location.search).has('debug')) return undefined;
+    const t = setInterval(() => {
+      const s = runtime.current?.session;
+      setStats(s ? { trackFps: s.stats.trackFps, tracking: s.isTracking } : null);
+    }, 500);
+    return () => clearInterval(t);
+  }, []);
+
   // Release everything on unmount.
   useEffect(() => () => void teardown(), [teardown]);
 
@@ -224,5 +235,6 @@ export function useWebAR({ containerRef, experience, assets }) {
     activeHotspot,
     fullscreen,
     toggleFullscreen,
+    stats,
   };
 }

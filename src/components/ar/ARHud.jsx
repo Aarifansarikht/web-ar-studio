@@ -48,6 +48,12 @@ export default function ARHud({ experience, ar, onClose }) {
         )}
       </header>
 
+      {ar.stats && (
+        <div className={styles.debugStats} aria-hidden="true">
+          tracker {ar.stats.trackFps} fps · {ar.stats.tracking ? 'locked' : 'searching'}
+        </div>
+      )}
+
       {status === 'starting' && (
         <div className={styles.centerStatus} role="status">
           <span className={styles.loader} />

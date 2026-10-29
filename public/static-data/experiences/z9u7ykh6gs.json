@@ -6,7 +6,8 @@
   "brand": {
     "name": "Bay81 Gallery",
     "accentColor": "#2e6fd8",
-    "logoUrl": null
+    "logoUrl": null,
+    "coverUrl": null
   },
   "content": {
     "type": "image",
@@ -48,13 +49,13 @@
     }
   ],
   "target": {
-    "imageUrl": "/uploads/z9u7ykh6gs/target-f9e22b9d42.jpg",
-    "mindUrl": "/uploads/z9u7ykh6gs/target-aa074b58d8.mind",
-    "width": 865,
-    "height": 1024,
+    "imageUrl": "/uploads/z9u7ykh6gs/target-e8cccc1899.jpg",
+    "mindUrl": "/uploads/z9u7ykh6gs/target-c6751f08f3.mind",
+    "width": 1729,
+    "height": 2048,
     "quality": "good",
-    "featureCount": 2285
+    "featureCount": 3813
   },
   "createdAt": "2026-10-28T12:03:37.894Z",
-  "updatedAt": "2026-10-28T12:03:37.894Z"
+  "updatedAt": "2026-10-29T05:12:26.084Z"
 }

@@ -602,3 +602,15 @@
     transform: scale(1.16);
   }
 }
+
+/* ?debug diagnostics */
+.debugStats {
+  position: absolute;
+  left: 12px;
+  bottom: calc(env(safe-area-inset-bottom) + 92px);
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.6);
+  font: 600 11px/1.3 ui-monospace, monospace;
+  color: #7dffb0;
+}

@@ -1,5 +1,194 @@
 [
   {
+    "id": "fjyd6wyh65",
+    "name": "The Starry Night — Living Painting",
+    "description": "Point your camera at Van Gogh’s The Starry Night and watch the sky swirl to life. Tap the dots to explore. Painting: Vincent van Gogh, 1889 — public domain (Wikimedia Commons).",
+    "status": "published",
+    "brand": {
+      "name": "Bay81 Gallery",
+      "accentColor": "#f2b705",
+      "logoUrl": null,
+      "coverUrl": null
+    },
+    "content": {
+      "type": "video",
+      "url": "/uploads/fjyd6wyh65/content-a2b0f98da1.mp4",
+      "fileName": "starry-night-living.mp4",
+      "fit": "target",
+      "loop": true,
+      "startMuted": true,
+      "playAnimations": true,
+      "aspect": 1
+    },
+    "placement": {
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "offsetZ": 0,
+      "rotationX": 0,
+      "rotationY": 0,
+      "rotationZ": 0
+    },
+    "hotspots": [
+      {
+        "id": "moon",
+        "label": "Crescent moon",
+        "x": 0.906,
+        "y": 0.171
+      },
+      {
+        "id": "swirl",
+        "label": "The swirling sky",
+        "x": 0.49,
+        "y": 0.33
+      },
+      {
+        "id": "cypress",
+        "label": "Cypress tree",
+        "x": 0.2,
+        "y": 0.53
+      },
+      {
+        "id": "church",
+        "label": "Village church",
+        "x": 0.568,
+        "y": 0.737
+      }
+    ],
+    "target": {
+      "imageUrl": "/uploads/fjyd6wyh65/target-87982f3068.jpg",
+      "mindUrl": "/uploads/fjyd6wyh65/target-baf5fb16dd.mind",
+      "width": 1920,
+      "height": 1520,
+      "quality": "good",
+      "featureCount": 5246
+    },
+    "createdAt": "2026-10-28T12:03:28.915Z",
+    "updatedAt": "2026-10-29T05:12:31.082Z"
+  },
+  {
+    "id": "z9u7ykh6gs",
+    "name": "Girl with a Pearl Earring — Explore Vermeer",
+    "description": "Discover the details of Vermeer’s masterpiece, with his View of Delft floating beside her. Paintings: Johannes Vermeer, c. 1660–1665 — public domain (Wikimedia Commons).",
+    "status": "published",
+    "brand": {
+      "name": "Bay81 Gallery",
+      "accentColor": "#2e6fd8",
+      "logoUrl": null,
+      "coverUrl": null
+    },
+    "content": {
+      "type": "image",
+      "url": "/uploads/z9u7ykh6gs/content-e30f1d0fa1.jpg",
+      "fileName": "view-of-delft.jpg",
+      "fit": "natural",
+      "loop": true,
+      "startMuted": true,
+      "playAnimations": true,
+      "aspect": 1
+    },
+    "placement": {
+      "scale": 0.48,
+      "offsetX": 0.24,
+      "offsetY": -0.36,
+      "offsetZ": 0.08,
+      "rotationX": 0,
+      "rotationY": -15,
+      "rotationZ": 0
+    },
+    "hotspots": [
+      {
+        "id": "pearl",
+        "label": "The pearl",
+        "x": 0.61,
+        "y": 0.53
+      },
+      {
+        "id": "turban",
+        "label": "Ultramarine turban",
+        "x": 0.49,
+        "y": 0.18
+      },
+      {
+        "id": "gaze",
+        "label": "The gaze",
+        "x": 0.33,
+        "y": 0.37
+      }
+    ],
+    "target": {
+      "imageUrl": "/uploads/z9u7ykh6gs/target-e8cccc1899.jpg",
+      "mindUrl": "/uploads/z9u7ykh6gs/target-c6751f08f3.mind",
+      "width": 1729,
+      "height": 2048,
+      "quality": "good",
+      "featureCount": 3813
+    },
+    "createdAt": "2026-10-28T12:03:37.894Z",
+    "updatedAt": "2026-10-29T05:12:26.084Z"
+  },
+  {
+    "id": "kyz99aw9q2",
+    "name": "The Great Wave — 3D Fox",
+    "description": "An animated 3D fox appears on Hokusai’s Great Wave. Print: Katsushika Hokusai, c. 1831 — public domain. Fox model: PixelMannen (CC0), rigging & animation: tomkranis (CC BY 4.0), glTF: AsoboStudio & scurest (CC BY 4.0), via Khronos glTF-Sample-Assets.",
+    "status": "published",
+    "brand": {
+      "name": "Bay81 Gallery",
+      "accentColor": "#c8102e",
+      "logoUrl": null,
+      "coverUrl": null
+    },
+    "content": {
+      "type": "model",
+      "url": "/uploads/kyz99aw9q2/content-cd57e0a8c6.glb",
+      "fileName": "Fox.glb",
+      "fit": "target",
+      "loop": true,
+      "startMuted": true,
+      "playAnimations": true,
+      "aspect": 1
+    },
+    "placement": {
+      "scale": 0.4,
+      "offsetX": -0.15,
+      "offsetY": -0.17,
+      "offsetZ": 0.12,
+      "rotationX": 0,
+      "rotationY": 90,
+      "rotationZ": 0
+    },
+    "hotspots": [
+      {
+        "id": "wave",
+        "label": "The great wave",
+        "x": 0.33,
+        "y": 0.22
+      },
+      {
+        "id": "fuji",
+        "label": "Mount Fuji",
+        "x": 0.64,
+        "y": 0.69
+      },
+      {
+        "id": "boats",
+        "label": "Fishing boats",
+        "x": 0.2,
+        "y": 0.66
+      }
+    ],
+    "target": {
+      "imageUrl": "/uploads/kyz99aw9q2/target-494c135e48.jpg",
+      "mindUrl": "/uploads/kyz99aw9q2/target-aae4b95405.mind",
+      "width": 1920,
+      "height": 1291,
+      "quality": "good",
+      "featureCount": 3988
+    },
+    "createdAt": "2026-10-28T12:03:33.278Z",
+    "updatedAt": "2026-10-29T05:12:20.897Z"
+  },
+  {
     "id": "vprgcfcwen",
     "name": "CEAT Premium Touring Tyre",
     "description": "Point your camera at the poster to watch the tyre come alive. Tap the dots to explore the tread.",
@@ -56,200 +245,14 @@
       }
     ],
     "target": {
-      "imageUrl": "/uploads/vprgcfcwen/target-ccb4b689d6.jpg",
-      "mindUrl": "/uploads/vprgcfcwen/target-7c639a4ebd.mind",
-      "width": 1024,
-      "height": 569,
+      "imageUrl": "/uploads/vprgcfcwen/target-903e236c7f.jpg",
+      "mindUrl": "/uploads/vprgcfcwen/target-978a62781a.mind",
+      "width": 1800,
+      "height": 1000,
       "quality": "good",
-      "featureCount": 1744
+      "featureCount": 2466
     },
     "createdAt": "2026-10-28T12:20:02.900Z",
-    "updatedAt": "2026-10-28T12:20:02.900Z"
-  },
-  {
-    "id": "kyz99aw9q2",
-    "name": "The Great Wave — 3D Fox",
-    "description": "An animated 3D fox appears on Hokusai’s Great Wave. Print: Katsushika Hokusai, c. 1831 — public domain. Fox model: PixelMannen (CC0), rigging & animation: tomkranis (CC BY 4.0), glTF: AsoboStudio & scurest (CC BY 4.0), via Khronos glTF-Sample-Assets.",
-    "status": "published",
-    "brand": {
-      "name": "Bay81 Gallery",
-      "accentColor": "#c8102e",
-      "logoUrl": null
-    },
-    "content": {
-      "type": "model",
-      "url": "/uploads/kyz99aw9q2/content-cd57e0a8c6.glb",
-      "fileName": "Fox.glb",
-      "fit": "target",
-      "loop": true,
-      "startMuted": true,
-      "playAnimations": true,
-      "aspect": 1
-    },
-    "placement": {
-      "scale": 0.4,
-      "offsetX": -0.15,
-      "offsetY": -0.17,
-      "offsetZ": 0.12,
-      "rotationX": 0,
-      "rotationY": 90,
-      "rotationZ": 0
-    },
-    "hotspots": [
-      {
-        "id": "wave",
-        "label": "The great wave",
-        "x": 0.33,
-        "y": 0.22
-      },
-      {
-        "id": "fuji",
-        "label": "Mount Fuji",
-        "x": 0.64,
-        "y": 0.69
-      },
-      {
-        "id": "boats",
-        "label": "Fishing boats",
-        "x": 0.2,
-        "y": 0.66
-      }
-    ],
-    "target": {
-      "imageUrl": "/uploads/kyz99aw9q2/target-13d0a3b413.jpg",
-      "mindUrl": "/uploads/kyz99aw9q2/target-159350a7c8.mind",
-      "width": 1024,
-      "height": 689,
-      "quality": "good",
-      "featureCount": 2998
-    },
-    "createdAt": "2026-10-28T12:03:33.278Z",
-    "updatedAt": "2026-10-28T12:07:45.320Z"
-  },
-  {
-    "id": "z9u7ykh6gs",
-    "name": "Girl with a Pearl Earring — Explore Vermeer",
-    "description": "Discover the details of Vermeer’s masterpiece, with his View of Delft floating beside her. Paintings: Johannes Vermeer, c. 1660–1665 — public domain (Wikimedia Commons).",
-    "status": "published",
-    "brand": {
-      "name": "Bay81 Gallery",
-      "accentColor": "#2e6fd8",
-      "logoUrl": null
-    },
-    "content": {
-      "type": "image",
-      "url": "/uploads/z9u7ykh6gs/content-e30f1d0fa1.jpg",
-      "fileName": "view-of-delft.jpg",
-      "fit": "natural",
-      "loop": true,
-      "startMuted": true,
-      "playAnimations": true,
-      "aspect": 1
-    },
-    "placement": {
-      "scale": 0.48,
-      "offsetX": 0.24,
-      "offsetY": -0.36,
-      "offsetZ": 0.08,
-      "rotationX": 0,
-      "rotationY": -15,
-      "rotationZ": 0
-    },
-    "hotspots": [
-      {
-        "id": "pearl",
-        "label": "The pearl",
-        "x": 0.61,
-        "y": 0.53
-      },
-      {
-        "id": "turban",
-        "label": "Ultramarine turban",
-        "x": 0.49,
-        "y": 0.18
-      },
-      {
-        "id": "gaze",
-        "label": "The gaze",
-        "x": 0.33,
-        "y": 0.37
-      }
-    ],
-    "target": {
-      "imageUrl": "/uploads/z9u7ykh6gs/target-f9e22b9d42.jpg",
-      "mindUrl": "/uploads/z9u7ykh6gs/target-aa074b58d8.mind",
-      "width": 865,
-      "height": 1024,
-      "quality": "good",
-      "featureCount": 2285
-    },
-    "createdAt": "2026-10-28T12:03:37.894Z",
-    "updatedAt": "2026-10-28T12:03:37.894Z"
-  },
-  {
-    "id": "fjyd6wyh65",
-    "name": "The Starry Night — Living Painting",
-    "description": "Point your camera at Van Gogh’s The Starry Night and watch the sky swirl to life. Tap the dots to explore. Painting: Vincent van Gogh, 1889 — public domain (Wikimedia Commons).",
-    "status": "published",
-    "brand": {
-      "name": "Bay81 Gallery",
-      "accentColor": "#f2b705",
-      "logoUrl": null
-    },
-    "content": {
-      "type": "video",
-      "url": "/uploads/fjyd6wyh65/content-a2b0f98da1.mp4",
-      "fileName": "starry-night-living.mp4",
-      "fit": "target",
-      "loop": true,
-      "startMuted": true,
-      "playAnimations": true,
-      "aspect": 1
-    },
-    "placement": {
-      "scale": 1,
-      "offsetX": 0,
-      "offsetY": 0,
-      "offsetZ": 0,
-      "rotationX": 0,
-      "rotationY": 0,
-      "rotationZ": 0
-    },
-    "hotspots": [
-      {
-        "id": "moon",
-        "label": "Crescent moon",
-        "x": 0.906,
-        "y": 0.171
-      },
-      {
-        "id": "swirl",
-        "label": "The swirling sky",
-        "x": 0.49,
-        "y": 0.33
-      },
-      {
-        "id": "cypress",
-        "label": "Cypress tree",
-        "x": 0.2,
-        "y": 0.53
-      },
-      {
-        "id": "church",
-        "label": "Village church",
-        "x": 0.568,
-        "y": 0.737
-      }
-    ],
-    "target": {
-      "imageUrl": "/uploads/fjyd6wyh65/target-df7f6db49f.jpg",
-      "mindUrl": "/uploads/fjyd6wyh65/target-fb24b84d63.mind",
-      "width": 1024,
-      "height": 811,
-      "quality": "good",
-      "featureCount": 3737
-    },
-    "createdAt": "2026-10-28T12:03:28.915Z",
-    "updatedAt": "2026-10-28T12:03:28.915Z"
+    "updatedAt": "2026-10-29T05:12:16.324Z"
   }
 ]
