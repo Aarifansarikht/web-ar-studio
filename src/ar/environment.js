@@ -58,6 +58,24 @@ export function detectARSupportIssue() {
   return null;
 }
 
+/**
+ * Ask for motion-sensor access (used for gyro-assisted extended tracking).
+ * iOS only allows this from a user gesture, so call it synchronously at the
+ * start of a tap handler. Resolves to false if unavailable or denied; AR still
+ * works, content then simply holds its last screen position when tracking is lost.
+ * @returns {Promise<boolean>}
+ */
+export function requestOrientationAccess() {
+  const DOE = window.DeviceOrientationEvent;
+  if (!DOE) return Promise.resolve(false);
+  if (typeof DOE.requestPermission === 'function') {
+    return DOE.requestPermission()
+      .then((state) => state === 'granted')
+      .catch(() => false);
+  }
+  return Promise.resolve(true);
+}
+
 /** Map a getUserMedia rejection to a user-facing ARError. */
 export function classifyCameraError(err) {
   const name = err?.name || '';

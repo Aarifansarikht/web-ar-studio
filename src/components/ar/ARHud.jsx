@@ -4,13 +4,22 @@ import BrandHeader from './BrandHeader.jsx';
 import { assetUrl } from '../../utils/url.js';
 import styles from './AR.module.css';
 
+const CHIP = {
+  tracking: { label: 'Tracking', tone: 'live' },
+  holding: { label: 'Extended tracking', tone: 'hold' },
+  fullscreen: { label: 'Full screen', tone: 'live' },
+};
+
 /** Overlay shown on top of the live camera view during an AR session. */
-export default function ARHud({ experience, ar, everFound, onClose }) {
+export default function ARHud({ experience, ar, onClose }) {
   const { status } = ar;
-  const scanning = status === 'scanning';
+  const scanning = status === 'scanning' && !ar.fullscreen;
   const tracking = status === 'tracking';
+  // After the first lock the content stays on screen; the scan UI never returns.
+  const active = tracking || status === 'holding' || ar.fullscreen;
   const hasHotspots = experience.hotspots?.length > 0;
   const [showTapHint, setShowTapHint] = useState(false);
+  const chip = ar.fullscreen ? CHIP.fullscreen : CHIP[status];
 
   // Briefly suggest tapping hotspots the first time the target is found.
   useEffect(() => {
@@ -31,6 +40,12 @@ export default function ARHud({ experience, ar, everFound, onClose }) {
         <button className={styles.iconBtn} onClick={onClose} aria-label="Close AR and turn off camera">
           <Icon name="x" size={22} />
         </button>
+        {chip && (
+          <span key={chip.label} className={`${styles.statusChip} ${styles[chip.tone]}`} role="status">
+            <i />
+            {chip.label}
+          </span>
+        )}
       </header>
 
       {status === 'starting' && (
@@ -57,15 +72,15 @@ export default function ARHud({ experience, ar, everFound, onClose }) {
         {scanning && (
           <p className={styles.hint} role="status">
             <Icon name="camera" size={18} />
-            {everFound ? 'Move your camera over the target image' : 'Point your camera at the image'}
+            Point your camera at the image
           </p>
         )}
-        {tracking && showTapHint && (
+        {active && showTapHint && (
           <p className={styles.hint} role="status">
             <Icon name="pin" size={18} /> Tap the dots to explore
           </p>
         )}
-        {tracking && ar.activeHotspot && (
+        {active && ar.activeHotspot && (
           // The label itself is drawn on the target in 3D; announce it for screen readers.
           <p className="visually-hidden" role="status">
             {ar.activeHotspot.label}
@@ -73,23 +88,35 @@ export default function ARHud({ experience, ar, everFound, onClose }) {
         )}
       </div>
 
-      {tracking && ar.videoBlocked && (
+      {active && ar.videoBlocked && (
         <button className={styles.playOverlay} onClick={ar.resumeVideo}>
           <Icon name="play" size={28} />
           <span>Tap to play video</span>
         </button>
       )}
 
-      {ar.hasVideo && (tracking || scanning) && !ar.videoBlocked && (
-        <button
-          className={`${styles.iconBtn} ${styles.muteBtn}`}
-          onClick={ar.toggleMute}
-          aria-label={ar.muted ? 'Turn sound on' : 'Mute'}
-          aria-pressed={!ar.muted}
-        >
-          <Icon name={ar.muted ? 'volumeOff' : 'volume'} size={20} />
-        </button>
-      )}
+      <div className={styles.sideControls}>
+        {active && (
+          <button
+            className={styles.iconBtn}
+            onClick={ar.toggleFullscreen}
+            aria-label={ar.fullscreen ? 'Return to AR view' : 'Show full screen'}
+            aria-pressed={ar.fullscreen}
+          >
+            <Icon name={ar.fullscreen ? 'shrink' : 'expand'} size={20} />
+          </button>
+        )}
+        {ar.hasVideo && (active || scanning) && !ar.videoBlocked && (
+          <button
+            className={styles.iconBtn}
+            onClick={ar.toggleMute}
+            aria-label={ar.muted ? 'Turn sound on' : 'Mute'}
+            aria-pressed={!ar.muted}
+          >
+            <Icon name={ar.muted ? 'volumeOff' : 'volume'} size={20} />
+          </button>
+        )}
+      </div>
     </div>
   );
 }

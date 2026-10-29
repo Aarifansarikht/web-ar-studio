@@ -14,7 +14,6 @@ export default function ARExperience() {
   const { id } = useParams();
   const [load, setLoad] = useState({ loading: true, error: null, experience: null });
   const [attempt, setAttempt] = useState(0);
-  const [everFound, setEverFound] = useState(false);
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -34,10 +33,6 @@ export default function ARExperience() {
   const supportIssue = useMemo(() => detectARSupportIssue(), []);
 
   useEffect(() => {
-    if (ar.status === 'tracking') setEverFound(true);
-  }, [ar.status]);
-
-  useEffect(() => {
     document.title = experience ? `${experience.name} · AR` : 'AR Experience';
   }, [experience]);
 
@@ -51,13 +46,11 @@ export default function ARExperience() {
     };
   }, []);
 
-  const start = useCallback(() => {
-    setEverFound(false);
-    ar.start();
-  }, [ar]);
+  // Called directly from the Start tap so permission prompts count as user-initiated.
+  const start = useCallback(() => ar.start(), [ar]);
 
   const accent = experience?.brand?.accentColor || '#e5173f';
-  const inSession = ['starting', 'scanning', 'tracking'].includes(ar.status);
+  const inSession = ['starting', 'scanning', 'tracking', 'holding'].includes(ar.status);
 
   let overlay = null;
   if (load.loading) {
@@ -91,7 +84,7 @@ export default function ARExperience() {
       />
     );
   } else if (inSession) {
-    overlay = <ARHud experience={experience} ar={ar} everFound={everFound} onClose={ar.stop} />;
+    overlay = <ARHud experience={experience} ar={ar} onClose={ar.stop} />;
   } else {
     overlay = (
       <ARSplash
@@ -109,7 +102,11 @@ export default function ARExperience() {
   return (
     <div className={styles.root} style={{ '--accent': accent }}>
       {/* Camera video + WebGL canvas are mounted here by the tracking session. */}
-      <div ref={containerRef} className={styles.stage} aria-hidden={!inSession} />
+      <div
+        ref={containerRef}
+        className={`${styles.stage} ${ar.fullscreen ? styles.stageDim : ''}`}
+        aria-hidden={!inSession}
+      />
       {overlay}
     </div>
   );

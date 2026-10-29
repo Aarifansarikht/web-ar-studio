@@ -1,13 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ImageTrackingSession } from '../ar/ImageTrackingSession.js';
-import { ARError, detectARSupportIssue } from '../ar/environment.js';
+import { ARError, detectARSupportIssue, requestOrientationAccess } from '../ar/environment.js';
 import { addModelLighting, createARContent } from '../ar/content.js';
 import { HotspotLayer } from '../ar/hotspots.js';
+import { LockOnFrame } from '../ar/lockOn.js';
 
 /**
  * Lifecycle of one image-tracked AR session.
  *
- * status: 'idle' | 'starting' | 'scanning' | 'tracking' | 'error'
+ * status: 'idle' | 'starting' | 'scanning' | 'tracking' | 'holding' | 'error'
+ *   scanning  – target not found yet
+ *   tracking  – target in view, content anchored to it
+ *   holding   – target left the view after being found; content stays
+ *               (gyro-stabilised extended tracking) and re-locks when seen again
  *
  * The camera is only requested when `start()` is called (from a user tap).
  * `stop()` and unmount release the camera, the tracking worker, the WebGL
@@ -19,6 +24,7 @@ export function useWebAR({ containerRef, experience, assets }) {
   const [videoBlocked, setVideoBlocked] = useState(false);
   const [muted, setMuted] = useState(true);
   const [activeHotspot, setActiveHotspot] = useState(null);
+  const [fullscreen, setFullscreenState] = useState(false);
 
   const runtime = useRef(null);
   const startingRef = useRef(false);
@@ -31,6 +37,7 @@ export function useWebAR({ containerRef, experience, assets }) {
     document.removeEventListener('visibilitychange', rt.onVisibility);
     rt.content?.dispose();
     rt.hotspots?.dispose();
+    rt.lockOn?.dispose();
     rt.disposeLighting?.();
     await rt.session.stop();
   }, []);
@@ -41,13 +48,17 @@ export function useWebAR({ containerRef, experience, assets }) {
     setStatus('idle');
     setVideoBlocked(false);
     setActiveHotspot(null);
+    setFullscreenState(false);
   }, [teardown]);
 
   const start = useCallback(async () => {
     const container = containerRef.current;
     if (!container || !experience || !assets || startingRef.current || runtime.current) return;
     startingRef.current = true;
+    // Must run synchronously inside the tap handler (iOS permission prompt).
+    const orientationAccess = requestOrientationAccess();
     setError(null);
+    setFullscreenState(false);
     setVideoBlocked(false);
     setActiveHotspot(null);
 
@@ -75,17 +86,22 @@ export function useWebAR({ containerRef, experience, assets }) {
         if (runtime.current !== rt) return;
         if (type === 'found') {
           setStatus('tracking');
+          if (!session.fullscreen) rt.lockOn?.play();
           playContent();
         } else {
-          setStatus('scanning');
-          rt.content?.onLost();
-          rt.hotspots?.toggle(null);
-          setActiveHotspot(null);
+          // Keep the content visible and playing: no return to the scan screen.
+          setStatus('holding');
         }
+      },
+      onModeChange: ({ fullscreen: on }) => {
+        if (runtime.current !== rt) return;
+        setFullscreenState(on);
+        if (on) rt.lockOn?.update(10); // hide brackets while detached
       },
       onFrame: (dt) => {
         rt.content?.update(dt);
         rt.hotspots?.update(dt);
+        rt.lockOn?.update(dt);
       },
     });
     rt.session = session;
@@ -101,13 +117,14 @@ export function useWebAR({ containerRef, experience, assets }) {
       const video = rt.content?.video;
       if (!video) return;
       if (document.hidden) video.pause();
-      else if (session.isTracking) playContent();
+      else if (session.hasFoundTarget) playContent();
     };
     runtime.current = rt;
 
     try {
       await session.start();
       if (runtime.current !== rt) return;
+      session.enableOrientation(await orientationAccess);
 
       if (experience.content.type === 'model') {
         rt.disposeLighting = addModelLighting(session.scene, session.renderer);
@@ -135,12 +152,16 @@ export function useWebAR({ containerRef, experience, assets }) {
         session.anchor.add(rt.hotspots.group);
       }
 
+      rt.lockOn = new LockOnFrame({ targetAspect: session.targetAspect, color: experience.brand?.accentColor });
+      session.anchor.add(rt.lockOn.group);
+
       container.addEventListener('click', rt.onClick);
       document.addEventListener('visibilitychange', rt.onVisibility);
       setMuted(content.video ? content.video.muted : true);
 
       if (session.isTracking) {
         setStatus('tracking');
+        rt.lockOn.play();
         playContent();
       } else {
         setStatus('scanning');
@@ -160,7 +181,16 @@ export function useWebAR({ containerRef, experience, assets }) {
     if (!video) return;
     video.muted = !video.muted;
     setMuted(video.muted);
-    if (video.paused && runtime.current.session.isTracking) video.play().catch(() => {});
+    if (video.paused && runtime.current.session.hasFoundTarget) video.play().catch(() => {});
+  }, []);
+
+  /** Toggle the screen-filling view of the content (works with or without tracking). */
+  const toggleFullscreen = useCallback(() => {
+    const rt = runtime.current;
+    if (!rt?.session) return;
+    const next = !rt.session.fullscreen;
+    rt.session.setFullscreen(next); // state is updated via onModeChange
+    if (next) rt.content?.onFound().then(({ blocked }) => runtime.current === rt && setVideoBlocked(blocked));
   }, []);
 
   const resumeVideo = useCallback(async () => {
@@ -192,5 +222,7 @@ export function useWebAR({ containerRef, experience, assets }) {
     toggleMute,
     hasVideo: experience?.content?.type === 'video',
     activeHotspot,
+    fullscreen,
+    toggleFullscreen,
   };
 }

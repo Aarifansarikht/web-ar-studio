@@ -138,6 +138,16 @@ The app uses MindAR's low-level **`Controller`** (the actual tracking engine) wi
 - allows **one session at a time** (a module-level lock)
 - **cleans up fully** on stop or unmount: camera tracks stopped, tracking loop drained before the worker is disposed and terminated, WebGL context released, textures/geometries/videos disposed, listeners removed
 
+### Tracking behaviour (enhanced / extended tracking)
+
+- **Smooth, low-lag tracking.** MindAR's One-Euro filter uses a low min-cutoff (no jitter when still) and a high beta (no lag when moving). The camera runs at 720p. Poses from the tracker (~15–30 Hz) are eased at the display rate (60 Hz), so content glides instead of stepping.
+- **Lock-on cue.** Accent corner brackets snap onto the target when it is recognised.
+- **No re-scan after the first lock.** If the image leaves the view, the content stays (*Extended tracking* chip). With motion sensors (requested on the Start tap; iOS shows a prompt), the content is **gyro-anchored**: turning the phone away and back keeps it where the poster was (3-DoF). Without sensors, it holds its last screen position.
+- **Auto full screen.** If the held content stays off-screen for more than 1.2 s, it glides into a centred full-screen view and the camera feed dims. When the image is seen again, the content glides back onto it automatically.
+- **Manual full screen.** The expand button shows the content full screen at any time; tap again to return to the AR view.
+
+Limits: extended tracking compensates rotation only. If the user walks sideways, the held content does not shift with them until the image is re-detected.
+
 ### AR content
 
 - **Video**: rendered as a `VideoTexture` plane. It starts muted (autoplay-safe) when the target is found. If the browser still blocks playback, a "Tap to play video" button appears, plus a mute/unmute toggle. *Match target* sizes it exactly over the target, like the reference overlay.
