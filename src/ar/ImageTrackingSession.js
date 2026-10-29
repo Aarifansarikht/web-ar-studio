@@ -26,6 +26,12 @@ const RATE_MOVE = 40;
 // tracker input (px), back to the stable 128px level below the exit size.
 const FINE_ENTER_PX = 210;
 const FINE_EXIT_PX = 170;
+// Motion prediction. The live camera is shown at full frame rate; each tracker
+// result describes a frame that is already some tens of ms old, so the pose is
+// extrapolated with the measured velocity to the moment of display. Capped so
+// a missed frame can never send content flying.
+const MAX_PREDICT_S = 0.12;
+const VELOCITY_SMOOTHING = 0.55; // weight of the newest velocity sample
 // Point used for the wobble diagnostic: 0.15 image widths in front of the centre.
 const WOBBLE_PROBE = new THREE.Vector3(0, 0, 0.15);
 // The tracker analyses a downscaled copy of the camera frame (long side in px).
@@ -45,6 +51,10 @@ const TUNING = (() => {
     beta: num('beta'),
     processLongSide: num('proc'),
     stabilise: q.get('stab') !== '0',
+    // &sync=1: show only tracker-analysed frames (perfect alignment, choppy at low tracker fps).
+    sync: q.get('sync') === '1',
+    predict: q.get('predict') !== '0',
+    maxPredict: num('maxp'),
   };
 })();
 
@@ -56,12 +66,12 @@ const TUNING = (() => {
  *   - +X right, +Y up, +Z out of the image towards the viewer
  *   - 1 unit = the target image's width (height = targetHeight / targetWidth)
  *
- * Frame-synchronised rendering: while the target is tracked, the camera image
- * on screen is the exact frame the tracker analysed, drawn in WebGL together
- * with the pose computed for that frame. Content therefore never lags or
- * slides relative to the printed image when the phone moves (the whole view
- * is delayed by one tracker frame instead). When not tracking, the live video
- * is shown for the smoothest scanning experience.
+ * Smooth rendering: the live camera video is always shown at its full frame
+ * rate, independent of how fast the tracker runs on the device. The content
+ * pose from each tracker frame is extrapolated (velocity prediction) to the
+ * moment of display, so content keeps up with the image while the phone moves.
+ * (A frame-synchronised mode, which shows only tracker-analysed frames, is
+ * kept for diagnostics: ?debug&sync=1.)
  */
 export class ImageTrackingSession {
   /**
@@ -120,6 +130,19 @@ export class ImageTrackingSession {
     this._tmpScale = new THREE.Vector3();
     this._snapPose = false;
     this._blendUntil = 0;
+
+    // Motion prediction state: last tracked (stabilised) pose, the time its
+    // camera frame was read, and smoothed linear/angular velocity.
+    this._inputT = 0;
+    this._predT = 0;
+    this._predP = new THREE.Vector3();
+    this._predQ = new THREE.Quaternion();
+    this._predS = new THREE.Vector3(1, 1, 1);
+    this._vel = new THREE.Vector3();
+    this._angVel = new THREE.Vector3(); // axis * rad/s
+    this._hasPred = false;
+    this._tmpVel = new THREE.Vector3();
+    this._tmpQ = new THREE.Quaternion();
 
     // Frame sync state.
     this._hasSyncedFrame = false;
@@ -250,9 +273,7 @@ export class ImageTrackingSession {
    * input canvas; we display that canvas and upload it to the GPU right now,
    * before the next frame overwrites it. No extra copies of the video.
    */
-  #promoteFrame() {
-    const tracked = this._frameTracked;
-    this._frameTracked = false;
+  #promoteFrame(tracked) {
     // Tracker missed this frame (fast motion/blur) but still reports its last
     // pose for up to missTolerance frames: pairing that stale pose with a new
     // camera frame would make content slip off the image. Keep showing the last
@@ -289,8 +310,9 @@ export class ImageTrackingSession {
       // still; a high beta lets the pose follow instantly when it moves.
       filterMinCF: TUNING.minCF ?? 0.0005,
       filterBeta: TUNING.beta ?? 800,
-      // Frames needed to confirm a detection before content appears.
-      warmupTolerance: 2,
+      // Frames needed to confirm a detection before content appears (kept
+      // minimal: content appears the moment the image is recognised).
+      warmupTolerance: 1,
       // Frames the tracker may miss (motion blur) before the target counts as
       // lost. Kept short: content must never linger where the image isn't.
       missTolerance: 3,
@@ -300,6 +322,48 @@ export class ImageTrackingSession {
     const { dimensions, trackingDataList } = this.controller.addImageTargetsFromBuffer(this.mindBuffer.slice(0));
     if (!dimensions?.length) {
       throw new ARError('engine', 'The image target data is invalid or was compiled with an incompatible version.');
+    }
+    // Timestamp each analysed camera frame (for motion prediction).
+    const loader = this.controller.inputLoader;
+    const loadInput = loader.loadInput.bind(loader);
+    let freshFrame = true;
+    loader.loadInput = (v) => {
+      this._inputT = performance.now() / 1000;
+      freshFrame = false;
+      return loadInput(v);
+    };
+    // Start the next tracking step as soon as the camera has a new frame
+    // (MindAR otherwise waits for a screen refresh after every frame, and may
+    // analyse the same camera frame twice). See vite.config.js.
+    if (typeof video.requestVideoFrameCallback === 'function') {
+      let waiter = null;
+      const controller = this.controller;
+      const onVideoFrame = () => {
+        if (this.stopped || this.controller !== controller) return; // rebuilt or stopped
+        freshFrame = true;
+        if (waiter) {
+          const w = waiter;
+          waiter = null;
+          w();
+        }
+        video.requestVideoFrameCallback(onVideoFrame);
+      };
+      video.requestVideoFrameCallback(onVideoFrame);
+      this.controller.nextFrameHook = () =>
+        new Promise((resolve) => {
+          if (freshFrame) {
+            setTimeout(resolve, 0); // yield so rendering can run
+            return;
+          }
+          waiter = resolve;
+          setTimeout(() => {
+            // Never stall if frame callbacks pause (e.g. camera hiccup).
+            if (waiter === resolve) {
+              waiter = null;
+              resolve();
+            }
+          }, 100);
+        });
     }
     this.#setupAdaptiveTracking(dimensions, trackingDataList);
     const [w, h] = dimensions[0];
@@ -329,29 +393,34 @@ export class ImageTrackingSession {
   #setupAdaptiveTracking(dimensions, trackingDataList) {
     const c = this.controller;
     const Tracker = c.tracker?.constructor;
-    if (!Tracker || !trackingDataList) return;
-    globalThis.__mindarTrackLevel = 0;
-    try {
-      this._fineTracker = new Tracker(dimensions, trackingDataList, c.projectionTransform, c.inputWidth, c.inputHeight, c.debugMode);
-    } catch {
-      this._fineTracker = null; // unpatched MindAR: stay on the default level
-    } finally {
-      delete globalThis.__mindarTrackLevel;
+    this._fineTracker = null;
+    if (Tracker && trackingDataList) {
+      globalThis.__mindarTrackLevel = 0;
+      try {
+        this._fineTracker = new Tracker(dimensions, trackingDataList, c.projectionTransform, c.inputWidth, c.inputHeight, c.debugMode);
+      } catch {
+        this._fineTracker = null; // unpatched MindAR: stay on the default level
+      } finally {
+        delete globalThis.__mindarTrackLevel;
+      }
     }
-    if (!this._fineTracker) return;
     const coarse = c.tracker;
     const fine = this._fineTracker;
     const minSide = Math.min(dimensions[0][0], dimensions[0][1]);
     const focal = c.projectionTransform[0][0];
     let level = 1;
     const trackAndUpdate = c._trackAndUpdate.bind(c);
+    // Also records whether this frame was actually tracked (vs. a miss that
+    // MindAR bridges by re-reporting the previous pose).
     c._trackAndUpdate = async (input, modelView, index) => {
-      const depth = modelView[2][3];
-      const apparent = depth > 0 ? (focal * minSide) / depth : 0;
-      if (level === 1 && apparent > FINE_ENTER_PX) level = 0;
-      else if (level === 0 && apparent < FINE_EXIT_PX) level = 1;
-      c.tracker = level === 0 ? fine : coarse;
-      this.stats.trackLevel = level === 0 ? 'fine' : 'coarse';
+      if (fine) {
+        const depth = modelView[2][3];
+        const apparent = depth > 0 ? (focal * minSide) / depth : 0;
+        if (level === 1 && apparent > FINE_ENTER_PX) level = 0;
+        else if (level === 0 && apparent < FINE_EXIT_PX) level = 1;
+        c.tracker = level === 0 ? fine : coarse;
+        this.stats.trackLevel = level === 0 ? 'fine' : 'coarse';
+      }
       const result = await trackAndUpdate(input, modelView, index);
       if (result) this._frameTracked = true;
       return result;
@@ -361,7 +430,8 @@ export class ImageTrackingSession {
   #onControllerUpdate(data) {
     if (data.type === 'processDone') {
       this._trackFrames++;
-      this.#promoteFrame();
+      if (TUNING.sync) this.#promoteFrame(this._frameTracked);
+      this._frameTracked = false;
       this._processDone?.();
       return;
     }
@@ -369,9 +439,13 @@ export class ImageTrackingSession {
 
     const { worldMatrix } = data;
     if (worldMatrix) {
+      // Missed frame (MindAR re-reports the previous pose): keep predicting
+      // from the last real measurement instead of treating it as "stopped".
+      if (this.tracking && !this._frameTracked) return;
       this._trackedMatrix.fromArray(worldMatrix).multiply(this._postMatrix);
       if (!this.tracking) this._stabInit = false; // first frame of a lock: no history
       this.#stabilisePose(this._trackedMatrix);
+      this.#updatePrediction(this.tracking);
       if (!this.tracking) {
         this.tracking = true;
         this._snapPose = true;
@@ -417,7 +491,48 @@ export class ImageTrackingSession {
     this._stabT = t;
     if (TUNING.stabilise === false) return; // ?debug&stab=0 (A/B diagnostics)
     m.compose(this._pS, this._qS, this._sS);
-    if (TUNING.debug) this.#recordWobble(this._wobble.shown, m);
+  }
+
+  /** Record the latest tracked pose and update the smoothed velocity estimate. */
+  #updatePrediction(continuing) {
+    const t = this._inputT || performance.now() / 1000;
+    const m = this._trackedMatrix;
+    m.decompose(this._sp, this._sq, this._ss);
+    const dt = t - this._predT;
+    if (continuing && this._hasPred && dt > 0.005 && dt < 0.25) {
+      const a = VELOCITY_SMOOTHING;
+      this._tmpVel.subVectors(this._sp, this._predP).divideScalar(dt);
+      this._vel.multiplyScalar(1 - a).addScaledVector(this._tmpVel, a);
+      // Angular velocity: rotation from the previous to the new orientation.
+      const dq = this._tmpQ.copy(this._sq).multiply(this._predQ.invert());
+      if (dq.w < 0) dq.set(-dq.x, -dq.y, -dq.z, -dq.w);
+      const angle = 2 * Math.acos(Math.min(1, dq.w));
+      const sinHalf = Math.sqrt(Math.max(0, 1 - dq.w * dq.w));
+      if (sinHalf > 1e-6) this._tmpVel.set(dq.x, dq.y, dq.z).multiplyScalar(angle / sinHalf / dt);
+      else this._tmpVel.set(0, 0, 0);
+      this._angVel.multiplyScalar(1 - a).addScaledVector(this._tmpVel, a);
+    } else {
+      this._vel.set(0, 0, 0);
+      this._angVel.set(0, 0, 0);
+    }
+    this._predP.copy(this._sp);
+    this._predQ.copy(this._sq);
+    this._predS.copy(this._ss);
+    this._predT = t;
+    this._hasPred = true;
+  }
+
+  /** Tracked pose extrapolated to now (the camera frame currently on screen). */
+  #predictedMatrix(out) {
+    const h = TUNING.predict === false ? 0 : Math.min(TUNING.maxPredict ?? MAX_PREDICT_S, Math.max(0, performance.now() / 1000 - this._predT));
+    this._gp.copy(this._predP).addScaledVector(this._vel, h);
+    const w = this._angVel.length();
+    this._gq.copy(this._predQ);
+    if (w * h > 1e-6) {
+      this._tmpVel.copy(this._angVel).divideScalar(w);
+      this._gq.premultiply(this._tmpQ.setFromAxisAngle(this._tmpVel, w * h));
+    }
+    return out.compose(this._gp, this._gq, this._predS);
   }
 
   /** Screen position (px) of a point in front of the image, for the wobble diagnostic. */
@@ -455,9 +570,9 @@ export class ImageTrackingSession {
     if (this.fullscreen) {
       goal = this.#fullscreenMatrix();
     } else if (this.tracking) {
-      // Synced: use the pose of the frame on screen, unsmoothed (smoothing
-      // here would re-introduce lag between the image and the content).
-      goal = this._synced ? this._goal.copy(this._displayMatrix) : this._goal.copy(this._trackedMatrix);
+      // Live video: tracked pose predicted to now. Synced (diagnostic): the
+      // pose of the exact frame on screen. Neither is smoothed again here.
+      goal = this._synced ? this._goal.copy(this._displayMatrix) : this.#predictedMatrix(this._goal);
       exact = true;
     } else {
       this.anchor.visible = false;
@@ -480,6 +595,7 @@ export class ImageTrackingSession {
     }
     this.anchor.matrix.compose(this._cp, this._cq, this._cs);
     this.anchor.matrixWorldNeedsUpdate = true;
+    if (TUNING.debug && exact) this.#recordWobble(this._wobble.shown, this.anchor.matrix);
     this.anchor.visible = true;
   }
 
@@ -559,8 +675,8 @@ export class ImageTrackingSession {
   #render() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
 
-    // Synced display while tracking; live video otherwise.
-    const synced = this.tracking && !this.fullscreen && this._hasSyncedFrame;
+    // Live video at full frame rate (synced display only in the ?debug&sync=1 diagnostic mode).
+    const synced = TUNING.sync === true && this.tracking && !this.fullscreen && this._hasSyncedFrame;
     if (synced !== this._synced) {
       this._synced = synced;
       if (this.video) this.video.style.opacity = synced ? '0' : '1';
@@ -579,7 +695,7 @@ export class ImageTrackingSession {
         return +Math.sqrt(v).toFixed(1);
       };
       this.stats.wobbleRaw = sd(this._wobble.raw);
-      this.stats.wobbleShown = TUNING.stabilise === false ? this.stats.wobbleRaw : sd(this._wobble.shown);
+      this.stats.wobbleShown = sd(this._wobble.shown); // what is actually drawn (incl. prediction)
       this._wobble = { raw: [], shown: [] };
       this._trackFrames = 0;
       this._statsAt = this.clock.elapsedTime;
