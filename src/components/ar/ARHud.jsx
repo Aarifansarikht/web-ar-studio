@@ -56,7 +56,7 @@ export default function ARHud({ experience, ar, onClose }) {
         <div className={styles.debugStats} aria-hidden="true">
           tracker {ar.stats.trackFps} fps · {ar.stats.tracking ? 'locked' : 'searching'}
           <br />
-          tilt jitter {ar.stats.tiltJitterRaw}° → {ar.stats.tiltJitterShown}°
+          wobble {ar.stats.wobbleRaw}px → {ar.stats.wobbleShown}px · {ar.stats.trackLevel}
         </div>
       )}
 

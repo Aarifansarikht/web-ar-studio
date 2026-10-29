@@ -3,12 +3,13 @@ import react from '@vitejs/plugin-react';
 import basicSsl from '@vitejs/plugin-basic-ssl';
 
 /**
- * Tunes MindAR 1.2.5's image tracker (constants inside its prebuilt bundle):
- *  - Track on the finer 256px template level (index 0) instead of the 128px
- *    one: about twice the tracking points and detail, so the target stays
- *    locked when only part of it is in view (walking up close to a poster).
- *  - Widen the per-frame search radius (10 → 12 px) so faster hand movement
- *    doesn't drop the lock at the finer level.
+ * Tunes MindAR 1.2.5's image tracker (code inside its prebuilt bundle):
+ *  - Allow a second tracker on the finer 256px template level (MindAR only
+ *    uses the 128px level). The session switches between them by the image's
+ *    apparent size: 128px is far more stable at normal viewing distances
+ *    (measured pose noise p90 3.7° vs 42° at 256px), while 256px keeps the
+ *    lock when you walk up close and only part of the image is in view.
+ *  - Widen the per-frame search radius (10 → 12 px) for faster hand movement.
  *  - Detect in a 512px window instead of 256px. MindAR searches for the
  *    target in one square window per frame, stepping through a 3×3 grid; at
  *    256px the grid only covers the frame centre and needs up to 9 frames, so
@@ -17,23 +18,26 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
  * Works with existing .mind files (both levels are always compiled).
  * MINDAR_TRACK_LEVEL=1 restores MindAR's defaults (for A/B testing).
  */
-function mindarTrackingTuning(level) {
+function mindarTrackingTuning(level, detectWindow) {
   const ORIGINAL = 'Z5 = 6, B5 = 1, H5 = 10, _5 = 1, U5 = 0.8, Y5 = 1,';
   const CROP_ORIGINAL = 'let o = Math.min(t, e) / 2, r = Math.pow(2, Math.round(Math.log(o) / Math.log(2)));';
   const CROP_TUNED = 'let o = Math.min(t, e), r = Math.pow(2, Math.floor(Math.log(o) / Math.log(2)));';
+  const LEVEL_ORIGINAL = 'this.trackingKeyframeList.push(e[l][Y5]);';
+  const LEVEL_TUNED = 'this.trackingKeyframeList.push(e[l][globalThis.__mindarTrackLevel ?? Y5]);';
   return {
     name: 'mindar-tracking-tuning',
     enforce: 'pre',
     transform(code, id) {
       // Dev requests carry a version query (?v=…); production ids don't.
       if (!/mind-ar[\\/]dist[\\/]controller-mGt1s8dJ\.js$/.test(id.split('?')[0])) return null;
-      if (!code.includes(ORIGINAL) || !code.includes(CROP_ORIGINAL)) {
+      if (!code.includes(ORIGINAL) || !code.includes(CROP_ORIGINAL) || !code.includes(LEVEL_ORIGINAL)) {
         throw new Error('[mindar-tracking-tuning] tracker code not found — mind-ar version changed? Re-check the patch.');
       }
       if (level === 1) return null;
       const tuned = code
-        .replace(ORIGINAL, 'Z5 = 6, B5 = 1, H5 = 12, _5 = 1, U5 = 0.8, Y5 = 0,')
-        .replace(CROP_ORIGINAL, CROP_TUNED);
+        .replace(ORIGINAL, 'Z5 = 6, B5 = 1, H5 = 12, _5 = 1, U5 = 0.8, Y5 = 1,')
+        .replace(CROP_ORIGINAL, detectWindow === 'small' ? CROP_ORIGINAL : CROP_TUNED)
+        .replace(LEVEL_ORIGINAL, LEVEL_TUNED);
       return { code: tuned, map: null };
     },
   };
@@ -46,7 +50,7 @@ export default defineConfig(({ mode }) => {
   const trackLevel = Number(process.env.MINDAR_TRACK_LEVEL ?? 0);
 
   return {
-    plugins: [mindarTrackingTuning(trackLevel), react(), ...(useHttps ? [basicSsl()] : [])],
+    plugins: [mindarTrackingTuning(trackLevel, process.env.MINDAR_DETECT_WINDOW), react(), ...(useHttps ? [basicSsl()] : [])],
     define: {
       // Vercel sets VERCEL=1 at build time: there is no API there, so the app
       // reads the exported static data directly instead of probing /api.

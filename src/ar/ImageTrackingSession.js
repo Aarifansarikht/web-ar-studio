@@ -6,17 +6,28 @@ import { loadMindAR } from './loadMindAR.js';
 let activeSession = null;
 
 const IDENTITY_QUAT = new THREE.Quaternion();
-const Z_AXIS = new THREE.Vector3(0, 0, 1);
-// Tilt stabiliser: the out-of-plane rotation (where the image plane "faces")
-// is the least observable part of a single-camera pose of a flat image, and its
-// noise makes content that sticks out of the wall wobble. It is smoothed with
-// an adaptive rate: strongly when the change is tiny (noise), fast when the
-// phone really turns. Position and in-plane rotation stay exact, so content
-// remains glued to the print.
-const TILT_STILL_DEG = 0.6;
-const TILT_MOVE_DEG = 5;
-const TILT_RATE_STILL = 4;
-const TILT_RATE_MOVE = 45;
+// Pose stabiliser. MindAR's One-Euro filter works on raw matrix values per
+// millisecond, so its speed term reacts to any noise and it barely smooths in
+// practice; content (especially 3D parts sticking out of the wall) wobbles.
+// We smooth the pose in meaningful units with an adaptive rate: changes small
+// enough to be noise are smoothed heavily, real motion is followed quickly.
+// Thresholds from measured tracker noise on a static, noisy camera feed
+// (rotation p90 ≈ 3.7°, position p90 ≈ 0.23% of distance). Real motion always
+// moves the image in the frame, so the position channel catches it even when
+// the rotation threshold is generous.
+const ROT_STILL_DEG = 2.5; // below: treated as noise
+const ROT_MOVE_DEG = 12; // above: real motion, follow fast
+const POS_STILL = 0.004; // translation change relative to camera distance
+const POS_MOVE = 0.03;
+const RATE_STILL = 2.5; // per second
+const RATE_MOVE = 40;
+// Adaptive tracking level (see vite.config.js): switch to the fine 256px
+// templates when the image's shorter side appears larger than this in the
+// tracker input (px), back to the stable 128px level below the exit size.
+const FINE_ENTER_PX = 210;
+const FINE_EXIT_PX = 170;
+// Point used for the wobble diagnostic: 0.15 image widths in front of the centre.
+const WOBBLE_PROBE = new THREE.Vector3(0, 0, 0.15);
 // The tracker analyses a downscaled copy of the camera frame (long side in px).
 // MindAR's projection is resolution-independent, so this is ~45% less work per
 // frame than 720p with no loss of alignment; the display stays at full 720p.
@@ -28,7 +39,13 @@ const TUNING = (() => {
   const q = new URLSearchParams(window.location.search);
   if (!q.has('debug')) return {};
   const num = (k) => (q.has(k) && Number.isFinite(+q.get(k)) ? +q.get(k) : undefined);
-  return { minCF: num('minCF'), beta: num('beta'), processLongSide: num('proc'), stabilise: q.get('stab') !== '0' };
+  return {
+    debug: true,
+    minCF: num('minCF'),
+    beta: num('beta'),
+    processLongSide: num('proc'),
+    stabilise: q.get('stab') !== '0',
+  };
 })();
 
 /**
@@ -84,14 +101,13 @@ export class ImageTrackingSession {
     this._sp = new THREE.Vector3();
     this._sq = new THREE.Quaternion();
     this._ss = new THREE.Vector3();
-    this._qc = new THREE.Quaternion();
-    this._nRaw = new THREE.Vector3();
-    this._nPrevRaw = new THREE.Vector3();
-    this._nStab = new THREE.Vector3();
-    this._nPrevStab = new THREE.Vector3();
+    this._pS = new THREE.Vector3();
+    this._qS = new THREE.Quaternion();
+    this._sS = new THREE.Vector3();
+    this._probe = new THREE.Vector3();
     this._stabInit = false;
     this._stabT = 0;
-    this._jitter = { raw: 0, shown: 0, n: 0 };
+    this._wobble = { raw: [], shown: [] };
     this._displayMatrix = new THREE.Matrix4(); // pose belonging to the displayed camera frame
     this._goal = new THREE.Matrix4();
     this._gp = new THREE.Vector3();
@@ -110,7 +126,7 @@ export class ImageTrackingSession {
     this._synced = false;
 
     /** Diagnostics: tracker frames processed per second. */
-    this.stats = { trackFps: 0, tiltJitterRaw: 0, tiltJitterShown: 0 };
+    this.stats = { trackFps: 0, wobbleRaw: 0, wobbleShown: 0, trackLevel: 'coarse' };
     this._trackFrames = 0;
     this._statsAt = 0;
   }
@@ -235,6 +251,13 @@ export class ImageTrackingSession {
    * before the next frame overwrites it. No extra copies of the video.
    */
   #promoteFrame() {
+    const tracked = this._frameTracked;
+    this._frameTracked = false;
+    // Tracker missed this frame (fast motion/blur) but still reports its last
+    // pose for up to missTolerance frames: pairing that stale pose with a new
+    // camera frame would make content slip off the image. Keep showing the last
+    // tracked frame and its pose instead (a brief hold, already on the GPU).
+    if (this.tracking && !tracked && this._hasSyncedFrame) return;
     const canvas = this.controller?.inputLoader?.context?.canvas;
     if (!canvas || !this.renderer) return;
     if (this.bgTexture.image !== canvas) this.bgTexture.image = canvas;
@@ -274,10 +297,11 @@ export class ImageTrackingSession {
       onUpdate: (data) => this.#onControllerUpdate(data),
     });
 
-    const { dimensions } = this.controller.addImageTargetsFromBuffer(this.mindBuffer.slice(0));
+    const { dimensions, trackingDataList } = this.controller.addImageTargetsFromBuffer(this.mindBuffer.slice(0));
     if (!dimensions?.length) {
       throw new ARError('engine', 'The image target data is invalid or was compiled with an incompatible version.');
     }
+    this.#setupAdaptiveTracking(dimensions, trackingDataList);
     const [w, h] = dimensions[0];
     this.targetAspect = h / w;
     this.targetWidth = w;
@@ -288,8 +312,50 @@ export class ImageTrackingSession {
     this.resize();
     // Compile GPU kernels before the first real frame (can take ~1s).
     this.controller.dummyRun(video);
+    if (this._fineTracker) {
+      const input = this.controller.inputLoader.loadInput(video);
+      this._fineTracker.dummyRun(input);
+      input.dispose();
+    }
     if (this.stopped) return;
     this.controller.processVideo(video);
+  }
+
+  /**
+   * Two trackers over the same image: MindAR's default 128px level (stable at
+   * normal distances) and the 256px level (keeps close-ups locked). Before each
+   * tracking step, pick one by the image's apparent size, with hysteresis.
+   */
+  #setupAdaptiveTracking(dimensions, trackingDataList) {
+    const c = this.controller;
+    const Tracker = c.tracker?.constructor;
+    if (!Tracker || !trackingDataList) return;
+    globalThis.__mindarTrackLevel = 0;
+    try {
+      this._fineTracker = new Tracker(dimensions, trackingDataList, c.projectionTransform, c.inputWidth, c.inputHeight, c.debugMode);
+    } catch {
+      this._fineTracker = null; // unpatched MindAR: stay on the default level
+    } finally {
+      delete globalThis.__mindarTrackLevel;
+    }
+    if (!this._fineTracker) return;
+    const coarse = c.tracker;
+    const fine = this._fineTracker;
+    const minSide = Math.min(dimensions[0][0], dimensions[0][1]);
+    const focal = c.projectionTransform[0][0];
+    let level = 1;
+    const trackAndUpdate = c._trackAndUpdate.bind(c);
+    c._trackAndUpdate = async (input, modelView, index) => {
+      const depth = modelView[2][3];
+      const apparent = depth > 0 ? (focal * minSide) / depth : 0;
+      if (level === 1 && apparent > FINE_ENTER_PX) level = 0;
+      else if (level === 0 && apparent < FINE_EXIT_PX) level = 1;
+      c.tracker = level === 0 ? fine : coarse;
+      this.stats.trackLevel = level === 0 ? 'fine' : 'coarse';
+      const result = await trackAndUpdate(input, modelView, index);
+      if (result) this._frameTracked = true;
+      return result;
+    };
   }
 
   #onControllerUpdate(data) {
@@ -305,7 +371,7 @@ export class ImageTrackingSession {
     if (worldMatrix) {
       this._trackedMatrix.fromArray(worldMatrix).multiply(this._postMatrix);
       if (!this.tracking) this._stabInit = false; // first frame of a lock: no history
-      this.#stabiliseTilt(this._trackedMatrix);
+      this.#stabilisePose(this._trackedMatrix);
       if (!this.tracking) {
         this.tracking = true;
         this._snapPose = true;
@@ -319,35 +385,47 @@ export class ImageTrackingSession {
     }
   }
 
-  /** Smooth only the image-plane normal (see TILT_* above), in place. */
-  #stabiliseTilt(m) {
+  /** Adaptive pose smoothing (see ROT_* and POS_* above), in place. */
+  #stabilisePose(m) {
     m.decompose(this._sp, this._sq, this._ss);
-    this._nRaw.copy(Z_AXIS).applyQuaternion(this._sq);
+    if (TUNING.debug) {
+      this.#recordWobble(this._wobble.raw, m);
+      // Raw pose log for offline analysis (?debug only).
+      const log = (window.__webarPoseLog ??= []);
+      if (log.length < 5000) log.push({ t: performance.now(), p: this._sp.toArray(), q: this._sq.toArray() });
+    }
     const t = performance.now() / 1000;
     if (!this._stabInit) {
-      this._nStab.copy(this._nRaw);
-      this._nPrevRaw.copy(this._nRaw);
-      this._nPrevStab.copy(this._nRaw);
+      this._pS.copy(this._sp);
+      this._qS.copy(this._sq);
+      this._sS.copy(this._ss);
       this._stabInit = true;
     } else {
       const dt = Math.min(0.2, t - this._stabT);
-      const deg = THREE.MathUtils.radToDeg(this._nStab.angleTo(this._nRaw));
-      const f = THREE.MathUtils.smoothstep(deg, TILT_STILL_DEG, TILT_MOVE_DEG);
-      const rate = THREE.MathUtils.lerp(TILT_RATE_STILL, TILT_RATE_MOVE, f);
-      this._nStab.lerp(this._nRaw, 1 - Math.exp(-rate * dt)).normalize();
-      // diagnostics
-      const j = this._jitter;
-      j.raw += this._nPrevRaw.angleTo(this._nRaw) ** 2;
-      j.shown += this._nPrevStab.angleTo(this._nStab) ** 2;
-      j.n++;
-      this._nPrevRaw.copy(this._nRaw);
-      this._nPrevStab.copy(this._nStab);
+      const { smoothstep, lerp, radToDeg } = THREE.MathUtils;
+      const rotDeg = radToDeg(this._qS.angleTo(this._sq));
+      const rotRate = lerp(RATE_STILL, RATE_MOVE, smoothstep(rotDeg, ROT_STILL_DEG, ROT_MOVE_DEG));
+      const rel = this._pS.distanceTo(this._sp) / Math.max(1e-6, this._sp.length());
+      const posRate = lerp(RATE_STILL, RATE_MOVE, smoothstep(rel, POS_STILL, POS_MOVE));
+      // Rotation and translation are coupled for a tracked plane: move them
+      // together at the faster rate so the content never drifts off the image.
+      const k = 1 - Math.exp(-Math.max(rotRate, posRate) * dt);
+      this._qS.slerp(this._sq, k);
+      this._pS.lerp(this._sp, k);
+      this._sS.lerp(this._ss, k);
     }
     this._stabT = t;
     if (TUNING.stabilise === false) return; // ?debug&stab=0 (A/B diagnostics)
-    this._qc.setFromUnitVectors(this._nRaw, this._nStab);
-    this._sq.premultiply(this._qc);
-    m.compose(this._sp, this._sq, this._ss);
+    m.compose(this._pS, this._qS, this._sS);
+    if (TUNING.debug) this.#recordWobble(this._wobble.shown, m);
+  }
+
+  /** Screen position (px) of a point in front of the image, for the wobble diagnostic. */
+  #recordWobble(list, m) {
+    if (!this.renderer) return;
+    const p = this._probe.copy(WOBBLE_PROBE).applyMatrix4(m).project(this.camera);
+    const { width, height } = this.renderer.domElement;
+    list.push([p.x * width * 0.5, p.y * height * 0.5]);
   }
 
   /* ---------------------------------------------------------------- pose */
@@ -491,13 +569,18 @@ export class ImageTrackingSession {
     this.#updatePose(dt);
     if (this.clock.elapsedTime - this._statsAt >= 1) {
       this.stats.trackFps = Math.round(this._trackFrames / (this.clock.elapsedTime - this._statsAt));
-      const j = this._jitter;
-      if (j.n) {
-        // RMS frame-to-frame change of the image-plane normal, in degrees
-        this.stats.tiltJitterRaw = +THREE.MathUtils.radToDeg(Math.sqrt(j.raw / j.n)).toFixed(2);
-        this.stats.tiltJitterShown = +THREE.MathUtils.radToDeg(Math.sqrt(j.shown / j.n)).toFixed(2);
-      }
-      this._jitter = { raw: 0, shown: 0, n: 0 };
+      // Wobble: standard deviation (px) of a point in front of the image over the
+      // last second. With the phone held still, this is pure tracking noise.
+      const sd = (pts) => {
+        if (pts.length < 3) return 0;
+        const mx = pts.reduce((a, q) => a + q[0], 0) / pts.length;
+        const my = pts.reduce((a, q) => a + q[1], 0) / pts.length;
+        const v = pts.reduce((a, q) => a + (q[0] - mx) ** 2 + (q[1] - my) ** 2, 0) / pts.length;
+        return +Math.sqrt(v).toFixed(1);
+      };
+      this.stats.wobbleRaw = sd(this._wobble.raw);
+      this.stats.wobbleShown = TUNING.stabilise === false ? this.stats.wobbleRaw : sd(this._wobble.shown);
+      this._wobble = { raw: [], shown: [] };
       this._trackFrames = 0;
       this._statsAt = this.clock.elapsedTime;
     }
