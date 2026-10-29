@@ -138,19 +138,18 @@ The app uses MindAR's low-level **`Controller`** (the actual tracking engine) wi
 - allows **one session at a time** (a module-level lock)
 - **cleans up fully** on stop or unmount: camera tracks stopped, tracking loop drained before the worker is disposed and terminated, WebGL context released, textures/geometries/videos disposed, listeners removed
 
-### Tracking behaviour (enhanced / extended tracking)
+### Tracking behaviour
 
-- **Smooth, low-lag tracking.** MindAR's One-Euro filter uses a low min-cutoff (no jitter when still) and a high beta (no lag when moving). The camera runs at 720p. Poses from the tracker (~15–30 Hz) are eased at the display rate (60 Hz), so content glides instead of stepping.
-- **Close-up tracking (Artivive-style).** The overlay stays locked when you walk up to the artwork and only part of it fills the screen. Two changes make this work, measured with a simulated walk-in/close-up/pan camera feed:
-  - *Tracker tuning* (Vite plugin `mindarTrackingTuning` in `vite.config.js`, MindAR pinned to 1.2.5). Tracking runs on the finer 256 px template level instead of 128 px, with a slightly wider search radius. Close-up lock: 18% → 66%.
-  - *Higher-resolution targets*. Images are compiled at up to 2048 px instead of 1024 px, so detection can re-find the target from a close-up. Combined with the tracker tuning: **100% lock** through walk-in, close-up, pan and back-out.
-  - Add `?debug` to an AR link to show the tracker's frame rate on a phone.
-  - Targets compiled before this change still work but should be re-uploaded (Admin → Replace target image) to get the close-up improvement.
+- **Frame-synchronised rendering (content glued to the image).** While the image is tracked, the camera picture on screen is the exact frame the tracker analysed, drawn in WebGL with the pose computed for that frame (zero-copy: MindAR's own input canvas is uploaded when the frame finishes). Content therefore cannot lag or slide relative to the print when the phone moves; the whole view is delayed by one tracker frame instead. When not tracking, the live video is shown. Measured with a simulated fast hand-pan and phone-like CPU throttling, misalignment between content and print dropped from **mean 31 px / median 35 px** (live video + smoothing) to **mean 10 px / median 3–13 px**. A static camera shows 0 px (no jitter).
+- **Faster tracking.** The tracker analyses a 960 px copy of the 720p camera frame (MindAR's projection is resolution-independent). This is about 45% less work than 720p and gave the best accuracy under fast motion in tests (vs 720 px and 1280 px).
+- **Close-up tracking (Artivive-style).** The overlay stays locked when you walk up to the artwork and only part of it fills the screen:
+  - *Tracker tuning* (Vite plugin `mindarTrackingTuning` in `vite.config.js`, MindAR pinned to 1.2.5). Tracking runs on the finer 256 px template level instead of 128 px, with a slightly wider search radius.
+  - *Higher-resolution targets*. Images are compiled at up to 2048 px so detection can re-find the target from a close-up. Result: **100% lock** through walk-in, close-up, pan and back-out.
+  - Targets compiled before this change still work but should be re-uploaded (Admin → Replace target image).
+- **Content only appears on the image.** If the image leaves the view, the content hides immediately and a small "Point at the artwork" hint shows (no scan screen). The tracker itself bridges up to 3 missed frames (motion blur). Content is never held or floated where the image isn't.
 - **Lock-on cue.** Accent corner brackets snap onto the target when it is recognised.
-- **No re-scan after the first lock.** If the image leaves the view, the content stays (*Extended tracking* chip). With motion sensors (requested on the Start tap; iOS shows a prompt), the content is **gyro-anchored** on the wall for up to 4 s (3-DoF). Without sensors it hides after 0.5 s (see "Tracking when the image is lost").
 - **Manual full screen.** The expand button shows the content full screen at any time; tap again to return to the AR view.
-
-Limits: extended tracking compensates rotation only. If the user walks sideways, the held content does not shift with them until the image is re-detected.
+- **Diagnostics.** Add `?debug` to an AR link to show the tracker frame rate. For field tuning you can also add `&minCF=…&beta=…` (pose filter) and `&proc=…` (analysis resolution).
 
 ### Layered 3D scenes (artwork stays on the wall)
 
@@ -162,12 +161,6 @@ For the most convincing effect, don't cover the whole print with a flat video. L
 - Hotspots accept an optional `z` (height above the image, in image widths), so markers can sit on 3D parts.
 
 The CEAT demo (`demo-assets/ceat/ceat-ar-scene.glb`) is built this way. It contains a feathered clean patch that hides the printed tyre, the same 3D tyre (PBR) lifting 0.1 image widths off the wall and spinning, a contact shadow, a glow, and light streaks. It is about 54k triangles, 2.1 MB, and was validated with Blender's glTF importer.
-
-### Tracking when the image is lost
-
-- With motion sensors: the content stays world-anchored on the wall (rotation-compensated) for up to 4 s, then hides.
-- Without motion sensors: only brief dropouts (0.5 s) are bridged, then the content hides with a "Point at the artwork" hint. It never freezes on screen as a floating picture.
-- Rotation is smoothed more strongly than position. Rotation is the noisiest part of a single-camera pose and shows up as a tilting/wobbling overlay.
 
 ### AR content
 

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ImageTrackingSession } from '../ar/ImageTrackingSession.js';
-import { ARError, detectARSupportIssue, requestOrientationAccess } from '../ar/environment.js';
+import { ARError, detectARSupportIssue } from '../ar/environment.js';
 import { addModelLighting, createARContent } from '../ar/content.js';
 import { HotspotLayer } from '../ar/hotspots.js';
 import { LockOnFrame } from '../ar/lockOn.js';
@@ -8,12 +8,11 @@ import { LockOnFrame } from '../ar/lockOn.js';
 /**
  * Lifecycle of one image-tracked AR session.
  *
- * status: 'idle' | 'starting' | 'scanning' | 'tracking' | 'holding' | 'error'
+ * status: 'idle' | 'starting' | 'scanning' | 'tracking' | 'searching' | 'error'
  *   scanning  – target not found yet
  *   tracking  – target in view, content anchored to it
- *   holding   – target left the view after being found; content stays on the
- *               wall (gyro-stabilised) and re-locks when seen again
- *   searching – hold expired; content hidden until the target is seen again
+ *   searching – target left the view after being found; content is hidden
+ *               (it only ever appears on the image) until the image is seen again
  *
  * The camera is only requested when `start()` is called (from a user tap).
  * `stop()` and unmount release the camera, the tracking worker, the WebGL
@@ -57,8 +56,6 @@ export function useWebAR({ containerRef, experience, assets }) {
     const container = containerRef.current;
     if (!container || !experience || !assets || startingRef.current || runtime.current) return;
     startingRef.current = true;
-    // Must run synchronously inside the tap handler (iOS permission prompt).
-    const orientationAccess = requestOrientationAccess();
     setError(null);
     setFullscreenState(false);
     setVideoBlocked(false);
@@ -90,11 +87,9 @@ export function useWebAR({ containerRef, experience, assets }) {
           setStatus('tracking');
           if (!session.fullscreen) rt.lockOn?.play();
           playContent();
-        } else if (type === 'lost') {
-          // Content stays on the wall (extended tracking); no scan screen.
-          setStatus('holding');
         } else {
-          // Hold expired: content hidden until the artwork is seen again.
+          // Target left the view: content hidden until the artwork is seen again
+          // (no scan screen; a small hint is shown instead).
           setStatus('searching');
         }
       },
@@ -129,7 +124,6 @@ export function useWebAR({ containerRef, experience, assets }) {
     try {
       await session.start();
       if (runtime.current !== rt) return;
-      session.enableOrientation(await orientationAccess);
 
       if (experience.content.type === 'model') {
         rt.disposeLighting = addModelLighting(session.scene, session.renderer);

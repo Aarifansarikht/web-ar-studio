@@ -5,14 +5,20 @@ import { loadMindAR } from './loadMindAR.js';
 /** Only one camera + tracking session may run at a time. */
 let activeSession = null;
 
-const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const IDENTITY_QUAT = new THREE.Quaternion();
-// How long lost content stays on the wall: with the gyroscope it stays
-// world-anchored (rotation-compensated); without, only brief dropouts are bridged.
-const GYRO_HOLD_SECONDS = 4;
-const STATIC_HOLD_SECONDS = 0.5;
-// Rotates the device frame so the camera looks out of the back of the phone.
-const DEVICE_TO_CAMERA = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5));
+// The tracker analyses a downscaled copy of the camera frame (long side in px).
+// MindAR's projection is resolution-independent, so this is ~45% less work per
+// frame than 720p with no loss of alignment; the display stays at full 720p.
+const PROCESS_LONG_SIDE = 960;
+
+// Diagnostics: ?debug&minCF=…&beta=… override the pose filter for field tuning.
+const TUNING = (() => {
+  if (typeof window === 'undefined') return {};
+  const q = new URLSearchParams(window.location.search);
+  if (!q.has('debug')) return {};
+  const num = (k) => (q.has(k) && Number.isFinite(+q.get(k)) ? +q.get(k) : undefined);
+  return { minCF: num('minCF'), beta: num('beta'), processLongSide: num('proc') };
+})();
 
 /**
  * Real image-target tracking session: camera feed + MindAR Controller +
@@ -21,14 +27,20 @@ const DEVICE_TO_CAMERA = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0
  *   - origin at the centre of the target image
  *   - +X right, +Y up, +Z out of the image towards the viewer
  *   - 1 unit = the target image's width (height = targetHeight / targetWidth)
+ *
+ * Frame-synchronised rendering: while the target is tracked, the camera image
+ * on screen is the exact frame the tracker analysed, drawn in WebGL together
+ * with the pose computed for that frame. Content therefore never lags or
+ * slides relative to the printed image when the phone moves (the whole view
+ * is delayed by one tracker frame instead). When not tracking, the live video
+ * is shown for the smoothest scanning experience.
  */
 export class ImageTrackingSession {
   /**
    * @param {object} opts
    * @param {HTMLElement} opts.container Full-size element that will host the video and canvas.
    * @param {ArrayBuffer} opts.mindBuffer Compiled `.mind` target data.
-   * @param {(e: {type: 'found'|'lost'|'searching'}) => void} [opts.onTrackingChange]
-   *   lost = target left the view, content held on the wall; searching = hold expired, content hidden
+   * @param {(e: {type: 'found'|'searching'}) => void} [opts.onTrackingChange]
    * @param {(e: {fullscreen: boolean}) => void} [opts.onModeChange]
    * @param {(dt: number, elapsed: number) => void} [opts.onFrame]
    */
@@ -56,10 +68,9 @@ export class ImageTrackingSession {
     this._postMatrix = new THREE.Matrix4();
     this._processDone = null;
 
-    // Pose state (allocated once; updated every frame).
-    this._trackedMatrix = new THREE.Matrix4();
-    this._holdMatrix = new THREE.Matrix4();
-    this._holdDeviceQuat = null;
+    // Pose state (allocated once).
+    this._trackedMatrix = new THREE.Matrix4(); // latest tracker result
+    this._displayMatrix = new THREE.Matrix4(); // pose belonging to the displayed camera frame
     this._goal = new THREE.Matrix4();
     this._gp = new THREE.Vector3();
     this._gq = new THREE.Quaternion();
@@ -69,15 +80,13 @@ export class ImageTrackingSession {
     this._cs = new THREE.Vector3(1, 1, 1);
     this._tmpPos = new THREE.Vector3();
     this._tmpScale = new THREE.Vector3();
-    this._relQuat = new THREE.Quaternion();
-    this._devQuat = new THREE.Quaternion();
-    this._screenQuat = new THREE.Quaternion();
-    this._euler = new THREE.Euler();
-    this._orientation = null;
     this._snapPose = false;
     this._blendUntil = 0;
-    this._lostAt = 0;
-    this._holdExpired = false;
+
+    // Frame sync state.
+    this._hasSyncedFrame = false;
+    this._synced = false;
+
     /** Diagnostics: tracker frames processed per second. */
     this.stats = { trackFps: 0 };
     this._trackFrames = 0;
@@ -89,7 +98,7 @@ export class ImageTrackingSession {
     return this.tracking;
   }
 
-  /** True once the target has been recognised at least once (content then stays visible). */
+  /** True once the target has been recognised at least once. */
   get hasFoundTarget() {
     return this.everFound;
   }
@@ -108,6 +117,7 @@ export class ImageTrackingSession {
       this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
       this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+      this.renderer.autoClear = false;
       Object.assign(this.renderer.domElement.style, {
         position: 'absolute',
         inset: '0',
@@ -116,6 +126,7 @@ export class ImageTrackingSession {
         maxWidth: 'none',
       });
       this.container.appendChild(this.renderer.domElement);
+      this.#createCameraBackground();
 
       await this.#buildController();
       if (this.stopped) return;
@@ -139,7 +150,7 @@ export class ImageTrackingSession {
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         audio: false,
-        // 720p gives a sharp full-screen feed and steadier tracking at distance.
+        // 720p gives a sharp full-screen feed; the tracker analyses a smaller copy.
         video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } },
       });
     } catch (err) {
@@ -179,23 +190,64 @@ export class ImageTrackingSession {
       video.srcObject = stream;
     });
     await video.play().catch(() => {});
-    video.setAttribute('width', video.videoWidth);
-    video.setAttribute('height', video.videoHeight);
   }
+
+  /* ---------------------------------------------------------------- camera frames */
+
+  #createCameraBackground() {
+    this.bgScene = new THREE.Scene();
+    this.bgCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+    this.bgTexture = new THREE.CanvasTexture(document.createElement('canvas'));
+    this.bgTexture.colorSpace = THREE.SRGBColorSpace;
+    this.bgTexture.minFilter = THREE.LinearFilter;
+    this.bgTexture.generateMipmaps = false;
+    const material = new THREE.MeshBasicMaterial({ map: this.bgTexture, depthTest: false, depthWrite: false, toneMapped: false });
+    this.bgMesh = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), material);
+    this.bgScene.add(this.bgMesh);
+  }
+
+  /**
+   * Tracker finished a frame: show that exact frame together with its pose.
+   * MindAR draws every analysed frame (RGB, at the tracker input size) into its
+   * input canvas; we display that canvas and upload it to the GPU right now,
+   * before the next frame overwrites it. No extra copies of the video.
+   */
+  #promoteFrame() {
+    const canvas = this.controller?.inputLoader?.context?.canvas;
+    if (!canvas || !this.renderer) return;
+    if (this.bgTexture.image !== canvas) this.bgTexture.image = canvas;
+    this.bgTexture.needsUpdate = true;
+    this.renderer.initTexture(this.bgTexture);
+    this._hasSyncedFrame = true;
+    if (this.tracking) this._displayMatrix.copy(this._trackedMatrix);
+  }
+
+  /* ---------------------------------------------------------------- tracker */
 
   async #buildController() {
     const { video } = this;
+    this._videoW = video.videoWidth;
+    this._videoH = video.videoHeight;
+    const s = Math.min(1, (TUNING.processLongSide ?? PROCESS_LONG_SIDE) / Math.max(video.videoWidth, video.videoHeight));
+    const inputWidth = Math.round(video.videoWidth * s);
+    const inputHeight = Math.round(video.videoHeight * s);
+    // MindAR's input loader draws the video at its width/height *attributes*:
+    // setting them to the tracker input size makes it downscale each frame.
+    // (CSS width/height, set in resize(), still control the on-screen size.)
+    video.setAttribute('width', inputWidth);
+    video.setAttribute('height', inputHeight);
     this.controller = new this.Controller({
-      inputWidth: video.videoWidth,
-      inputHeight: video.videoHeight,
+      inputWidth,
+      inputHeight,
       maxTrack: 1,
       // One-Euro filter: a low min-cutoff removes jitter when the phone is
-      // still; a high beta lets the pose catch up instantly when it moves.
-      // (Beta near 0 makes content lag and "swim" behind the target.)
-      filterMinCF: 0.0005,
-      filterBeta: 800,
+      // still; a high beta lets the pose follow instantly when it moves.
+      filterMinCF: TUNING.minCF ?? 0.0005,
+      filterBeta: TUNING.beta ?? 800,
       warmupTolerance: 3,
-      missTolerance: 6,
+      // Frames the tracker may miss (motion blur) before the target counts as
+      // lost. Kept short: content must never linger where the image isn't.
+      missTolerance: 3,
       onUpdate: (data) => this.#onControllerUpdate(data),
     });
 
@@ -208,11 +260,7 @@ export class ImageTrackingSession {
     this.targetWidth = w;
     // MindAR reports poses in target-pixel units with the origin at the
     // bottom-left corner; re-centre and normalise so 1 unit = target width.
-    this._postMatrix.compose(
-      new THREE.Vector3(w / 2, h / 2, 0),
-      new THREE.Quaternion(),
-      new THREE.Vector3(w, w, w),
-    );
+    this._postMatrix.compose(new THREE.Vector3(w / 2, h / 2, 0), new THREE.Quaternion(), new THREE.Vector3(w, w, w));
 
     this.resize();
     // Compile GPU kernels before the first real frame (can take ~1s).
@@ -224,6 +272,7 @@ export class ImageTrackingSession {
   #onControllerUpdate(data) {
     if (data.type === 'processDone') {
       this._trackFrames++;
+      this.#promoteFrame();
       this._processDone?.();
       return;
     }
@@ -231,124 +280,69 @@ export class ImageTrackingSession {
 
     const { worldMatrix } = data;
     if (worldMatrix) {
-      // Only store the goal pose; #updatePose() eases towards it every frame.
       this._trackedMatrix.fromArray(worldMatrix).multiply(this._postMatrix);
       if (!this.tracking) {
         this.tracking = true;
-        // First lock, or the held content had already been hidden: appear in
-        // place. Otherwise glide from the held pose back onto the target.
-        if (!this.everFound || this._holdExpired) this._snapPose = true;
-        else this._blendUntil = this.clock.elapsedTime + 0.35;
+        this._snapPose = true;
         this.everFound = true;
-        this._holdExpired = false;
         this.onTrackingChange?.({ type: 'found' });
       }
     } else if (this.tracking) {
+      // Lost: hide immediately. Content only ever appears where the image is.
       this.tracking = false;
-      // Extended tracking: keep the content where it was and, if the gyroscope
-      // is available, counter-rotate it as the phone turns.
-      this._holdMatrix.copy(this._trackedMatrix);
-      this._holdDeviceQuat = this.#deviceQuaternion()?.clone() ?? null;
-      this._lostAt = this.clock.elapsedTime;
-      this.onTrackingChange?.({ type: 'lost' });
+      this.onTrackingChange?.({ type: 'searching' });
     }
   }
 
-  /* ------------------------------------------------- pose: tracking / hold / full screen */
+  /* ---------------------------------------------------------------- pose */
 
   /** Show the content facing the camera, sized to fill the screen (independent of tracking). */
   setFullscreen(on) {
     if (this.fullscreen === on) return;
     this.fullscreen = on;
-    this._blendUntil = this.clock.elapsedTime + 0.7;
-    if (on && (!this.everFound || this._holdExpired)) this._snapPose = true;
+    this._blendUntil = this.clock.elapsedTime + 0.6;
+    if (on && !this.tracking) this._snapPose = true;
     this.onModeChange?.({ fullscreen: on });
   }
 
-  /** Enable gyroscope-assisted extended tracking (call after permission is granted). */
-  enableOrientation(enabled) {
-    if (!enabled || this.#onOrientation || typeof window.DeviceOrientationEvent === 'undefined') return;
-    this.#onOrientation = (e) => {
-      if (e.alpha === null && e.beta === null) return;
-      this._orientation = { alpha: e.alpha ?? 0, beta: e.beta ?? 0, gamma: e.gamma ?? 0 };
-    };
-    window.addEventListener('deviceorientation', this.#onOrientation);
-  }
-
-  #onOrientation = null;
-
-  /** Camera orientation in world space from DeviceOrientation (three.js convention). */
-  #deviceQuaternion() {
-    const o = this._orientation;
-    if (!o) return null;
-    const deg = THREE.MathUtils.DEG2RAD;
-    const screenAngle = (screen.orientation?.angle ?? window.orientation ?? 0) * deg;
-    this._euler.set(o.beta * deg, o.alpha * deg, -o.gamma * deg, 'YXZ');
-    return this._devQuat
-      .setFromEuler(this._euler)
-      .multiply(DEVICE_TO_CAMERA)
-      .multiply(this._screenQuat.setFromAxisAngle(Z_AXIS, -screenAngle));
-  }
-
-  #goalMatrix() {
-    if (this.fullscreen) {
-      // Fit the target rectangle inside the viewport with a small margin.
-      const { camera } = this;
-      const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
-      const fitWidth = 1 / (2 * tanHalf * camera.aspect);
-      const fitHeight = this.targetAspect / (2 * tanHalf);
-      const dist = Math.max(fitWidth, fitHeight) * 1.08 * this.targetWidth;
-      return this._goal.compose(
-        this._tmpPos.set(0, 0, -dist),
-        IDENTITY_QUAT,
-        this._tmpScale.setScalar(this.targetWidth),
-      );
-    }
-    if (this.tracking) return this._goal.copy(this._trackedMatrix);
-    if (!this.everFound || this._holdExpired) return null;
-
-    // Target lost: keep the content attached to the wall where it was.
-    const held = this.clock.elapsedTime - this._lostAt;
-    const now = this.#deviceQuaternion();
-    if (now && this._holdDeviceQuat && held < GYRO_HOLD_SECONDS) {
-      // Gyro-stabilised (rotation only): anchor_now = R(camera_now⁻¹ · camera_at_loss) · anchor_at_loss
-      this._relQuat.copy(now).invert().multiply(this._holdDeviceQuat);
-      return this._goal.makeRotationFromQuaternion(this._relQuat).multiply(this._holdMatrix);
-    }
-    if (!now && held < STATIC_HOLD_SECONDS) {
-      // No motion sensors: bridge short dropouts (motion blur) only. Holding
-      // longer would leave a picture floating on screen, detached from the wall.
-      return this._goal.copy(this._holdMatrix);
-    }
-    this._holdExpired = true;
-    this.onTrackingChange?.({ type: 'searching' });
-    return null;
+  #fullscreenMatrix() {
+    // Fit the target rectangle inside the viewport with a small margin.
+    const { camera } = this;
+    const tanHalf = Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2);
+    const fitWidth = 1 / (2 * tanHalf * camera.aspect);
+    const fitHeight = this.targetAspect / (2 * tanHalf);
+    const dist = Math.max(fitWidth, fitHeight) * 1.08 * this.targetWidth;
+    return this._goal.compose(this._tmpPos.set(0, 0, -dist), IDENTITY_QUAT, this._tmpScale.setScalar(this.targetWidth));
   }
 
   #updatePose(dt) {
-    const goal = this.#goalMatrix();
-    if (!goal) {
+    let goal;
+    let exact = false;
+    if (this.fullscreen) {
+      goal = this.#fullscreenMatrix();
+    } else if (this.tracking) {
+      // Synced: use the pose of the frame on screen, unsmoothed (smoothing
+      // here would re-introduce lag between the image and the content).
+      goal = this._synced ? this._goal.copy(this._displayMatrix) : this._goal.copy(this._trackedMatrix);
+      exact = true;
+    } else {
       this.anchor.visible = false;
       return;
     }
+
     goal.decompose(this._gp, this._gq, this._gs);
-    if (this._snapPose) {
+    const blending = this.clock.elapsedTime < this._blendUntil;
+    if (this._snapPose || (exact && !blending)) {
       this._cp.copy(this._gp);
       this._cq.copy(this._gq);
       this._cs.copy(this._gs);
       this._snapPose = false;
     } else {
-      // Frame-rate independent exponential smoothing. Tracker poses arrive at
-      // ~15-30 Hz; easing at render rate (60 Hz) removes stepping. Rotation is
-      // the noisiest part of a single-camera pose estimate (it shows as the
-      // content "tilting"), so it is smoothed more than position, which stays
-      // responsive and keeps the content glued to the image.
-      const blending = this.clock.elapsedTime < this._blendUntil;
-      const posRate = blending ? 9 : this.tracking ? 28 : 30;
-      const rotRate = blending ? 9 : this.tracking ? 14 : 30;
-      this._cp.lerp(this._gp, 1 - Math.exp(-dt * posRate));
-      this._cq.slerp(this._gq, 1 - Math.exp(-dt * rotRate));
-      this._cs.lerp(this._gs, 1 - Math.exp(-dt * posRate));
+      // Glide only for full-screen transitions.
+      const k = 1 - Math.exp(-dt * 9);
+      this._cp.lerp(this._gp, k);
+      this._cq.slerp(this._gq, k);
+      this._cs.lerp(this._gs, k);
     }
     this.anchor.matrix.compose(this._cp, this._cq, this._cs);
     this.anchor.matrixWorldNeedsUpdate = true;
@@ -361,28 +355,23 @@ export class ImageTrackingSession {
   async #handleVideoResize() {
     const { video, controller } = this;
     if (!video || !controller || this.stopped) return;
-    if (video.videoWidth === controller.inputWidth && video.videoHeight === controller.inputHeight) {
+    if (video.videoWidth === this._videoW && video.videoHeight === this._videoH) {
       this.resize();
       return;
     }
     await this.#disposeController();
     if (this.stopped) return;
-    video.setAttribute('width', video.videoWidth);
-    video.setAttribute('height', video.videoHeight);
     if (this.tracking) {
-      // Hold the content while the tracker restarts for the new orientation.
       this.tracking = false;
-      this._holdMatrix.copy(this._trackedMatrix);
-      this._holdDeviceQuat = this.#deviceQuaternion()?.clone() ?? null;
-      this._lostAt = this.clock.elapsedTime;
-      this.onTrackingChange?.({ type: 'lost' });
+      this.onTrackingChange?.({ type: 'searching' });
     }
     await this.#buildController();
   }
 
   /**
    * Fit the video to cover the container and derive a three.js camera whose
-   * projection matches MindAR's (port of MindARThree.resize).
+   * projection matches MindAR's (port of MindARThree.resize). The WebGL camera
+   * background uses the same cover crop as the <video> element.
    */
   resize() {
     const { video, controller, container, camera, renderer } = this;
@@ -404,16 +393,11 @@ export class ImageTrackingSession {
       vh = vw / videoRatio;
     }
 
+    // MindAR's projection is defined for the tracker input's aspect ratio and
+    // does not depend on its resolution (the input is a scaled copy of the video).
     const proj = controller.getProjectionMatrix();
     const inputRatio = controller.inputWidth / controller.inputHeight;
-    const scale =
-      inputRatio > containerRatio
-        ? video.videoWidth / controller.inputWidth
-        : video.videoHeight / controller.inputHeight;
-    const projectedHeight =
-      inputRatio > containerRatio
-        ? ch * scale
-        : (cw / controller.inputWidth) * controller.inputHeight * scale;
+    const projectedHeight = inputRatio > containerRatio ? ch : (cw / controller.inputWidth) * controller.inputHeight;
     const fovRatio = ch / projectedHeight;
 
     camera.fov = (2 * Math.atan((1 / proj[5]) * fovRatio) * 180) / Math.PI;
@@ -428,11 +412,26 @@ export class ImageTrackingSession {
       width: `${vw}px`,
       height: `${vh}px`,
     });
+
+    // Same cover crop for the WebGL camera background.
+    const rx = cw / vw;
+    const ry = ch / vh;
+    this.bgTexture.repeat.set(rx, ry);
+    this.bgTexture.offset.set((1 - rx) / 2, (1 - ry) / 2);
+
     renderer.setSize(cw, ch, true);
   }
 
   #render() {
     const dt = Math.min(this.clock.getDelta(), 0.1);
+
+    // Synced display while tracking; live video otherwise.
+    const synced = this.tracking && !this.fullscreen && this._hasSyncedFrame;
+    if (synced !== this._synced) {
+      this._synced = synced;
+      if (this.video) this.video.style.opacity = synced ? '0' : '1';
+    }
+
     this.#updatePose(dt);
     if (this.clock.elapsedTime - this._statsAt >= 1) {
       this.stats.trackFps = Math.round(this._trackFrames / (this.clock.elapsedTime - this._statsAt));
@@ -440,7 +439,11 @@ export class ImageTrackingSession {
       this._statsAt = this.clock.elapsedTime;
     }
     this.onFrame?.(dt, this.clock.elapsedTime);
-    this.renderer.render(this.scene, this.camera);
+
+    const r = this.renderer;
+    r.clear();
+    if (this._synced) r.render(this.bgScene, this.bgCamera);
+    r.render(this.scene, this.camera);
   }
 
   /** Raycast helper for tap interactions on anchored content. */
@@ -482,7 +485,6 @@ export class ImageTrackingSession {
 
     this.renderer?.setAnimationLoop(null);
     this.resizeObserver?.disconnect();
-    if (this.#onOrientation) window.removeEventListener('deviceorientation', this.#onOrientation);
     if (this.video && this.#onVideoResize) this.video.removeEventListener('resize', this.#onVideoResize);
 
     this.stream?.getTracks().forEach((track) => track.stop());
@@ -496,6 +498,10 @@ export class ImageTrackingSession {
       this.video.remove();
       this.video = null;
     }
+
+    this.bgMesh?.geometry.dispose();
+    this.bgMesh?.material.dispose();
+    this.bgTexture?.dispose();
 
     if (this.renderer) {
       this.renderer.dispose();

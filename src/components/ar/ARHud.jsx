@@ -6,7 +6,6 @@ import styles from './AR.module.css';
 
 const CHIP = {
   tracking: { label: 'Tracking', tone: 'live' },
-  holding: { label: 'Extended tracking', tone: 'hold' },
   searching: { label: 'Searching', tone: 'hold' },
   fullscreen: { label: 'Full screen', tone: 'live' },
 };
@@ -17,7 +16,7 @@ export default function ARHud({ experience, ar, onClose }) {
   const scanning = status === 'scanning' && !ar.fullscreen;
   const tracking = status === 'tracking';
   // After the first lock the content stays on screen; the scan UI never returns.
-  const active = tracking || status === 'holding' || ar.fullscreen;
+  const active = tracking || ar.fullscreen;
   const hasHotspots = experience.hotspots?.length > 0;
   const [showTapHint, setShowTapHint] = useState(false);
   const chip = ar.fullscreen ? CHIP.fullscreen : CHIP[status];
