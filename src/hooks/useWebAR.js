@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { ImageTrackingSession } from '../ar/ImageTrackingSession.js';
+import { EighthWallSession } from '../ar/EighthWallSession.js';
+import { assetUrl } from '../utils/url.js';
 import { ARError, detectARSupportIssue } from '../ar/environment.js';
 import { addModelLighting, createARContent, modelDepth } from '../ar/content.js';
 import { HotspotLayer } from '../ar/hotspots.js';
@@ -24,7 +26,7 @@ import { requestMotionAccess } from '../ar/GyroTracker.js';
  * `stop()` and unmount release the camera, the tracking worker, the WebGL
  * context and all content resources.
  */
-export function useWebAR({ containerRef, experiences, assets }) {
+export function useWebAR({ containerRef, experiences, assets, engine = 'mindar' }) {
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState(null);
   const [videoBlocked, setVideoBlocked] = useState(false);
@@ -105,9 +107,11 @@ export function useWebAR({ containerRef, experiences, assets }) {
       if (runtime.current === rt) setVideoBlocked(blocked);
     };
 
-    const session = new ImageTrackingSession({
+    const Session = engine === '8w' ? EighthWallSession : ImageTrackingSession;
+    const session = new Session({
       container,
       mindBuffer: assets.mindBuffer,
+      targets: experiences.map((e) => ({ id: e.id, url: assetUrl(e.target.imageUrl) })),
       onTrackingChange: ({ type, targetIndex }) => {
         if (runtime.current !== rt) return;
         if (type === 'found') {
@@ -226,7 +230,7 @@ export function useWebAR({ containerRef, experiences, assets }) {
     } finally {
       startingRef.current = false;
     }
-  }, [containerRef, experiences, assets, teardown]);
+  }, [containerRef, experiences, assets, engine, teardown]);
 
   const activeVideo = () => {
     const rt = runtime.current;

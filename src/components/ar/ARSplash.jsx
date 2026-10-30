@@ -8,7 +8,7 @@ import styles from './AR.module.css';
  * "Preloading" bar while assets download, then the Start AR button.
  * The camera is NOT requested here.
  */
-export default function ARSplash({ experience, artworks, progress, ready, loadError, onRetry, supportIssue, onStart }) {
+export default function ARSplash({ experience, artworks, engine, progress, ready, loadError, onRetry, supportIssue, onStart }) {
   const pct = Math.round(progress * 100);
 
   return (
@@ -73,6 +73,16 @@ export default function ARSplash({ experience, artworks, progress, ready, loadEr
           </div>
         )}
       </div>
+      {engine === '8w' && (
+        // Required attribution for the 8th Wall Distributed Engine Binary.
+        <p className={styles.engineCredit}>
+          AR engine: 8th Wall, created by Niantic Spatial, Inc. ·{' '}
+          <a href="https://github.com/8thwall/engine/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">
+            XR Engine License
+          </a>{' '}
+          · provided as is, without warranties
+        </p>
+      )}
     </div>
   );
 }

@@ -118,6 +118,35 @@ NODE_ENV=production ADMIN_TOKEN=<long-random-secret> DATA_DIR=/var/lib/webar POR
 | `/ar/:id` | Public QR landing page and AR session |
 | `/gallery` | **Gallery**: one link / QR code that recognises every published artwork (`?ids=a,b,c` picks and orders them) |
 
+### 8th Wall engine (optional: `?engine=8w`)
+
+Any AR link (`/ar/<id>`, `/gallery`) can run on the **8th Wall engine** instead of MindAR by adding `?engine=8w`. Niantic Spatial made it free in 2026; the engine binary is in `public/external/xr`, copied from the npm package `@8thwall/engine-binary`.
+
+- `src/ar/EighthWallSession.js` has the same interface as `ImageTrackingSession`, so content, hotspots, the gallery and full screen work unchanged.
+- Target data is built in the browser from each experience's target image (3:4 crop, 480×640 greyscale; landscape images rotated to portrait). No extra files are needed per experience.
+- The anchor maps the engine's pose of the tracked crop back to full-image target space.
+
+Measured on the same simulated feeds (average gap between the overlay and the printed edges):
+
+| Feed | MindAR | 8th Wall |
+| --- | --- | --- |
+| Fast pan | 1.5 px | **0.1 px** |
+| Phone rotation | 0.5 px | **0.1 px** |
+| Slow approach | 0.5 px | **0.2 px** |
+| Steep 45° view | **0.7 px** | 12 px* |
+
+8th Wall also delivered about 75–90 pose updates per second (MindAR: 30). *8th Wall uses its own per-device camera data; the simulated desktop camera is unknown to it, so it guessed the lens. On real phones this should not apply, but it is not yet verified.
+
+**Licence (XR Engine License Agreement, `public/external/xr/LICENSE`).**
+- Free, including commercially, as part of a larger product (for example client campaigns).
+- Attribution to Niantic Spatial is required. It is kept in the `xr.js` header and shown on the AR start screen when this engine is used.
+- Restrictions:
+  - No use in a paid product whose value comes mainly from the engine.
+  - No modifying or reverse engineering it.
+  - No building a product that competes with it.
+- It can be terminated with 5 days' notice.
+- **Get legal advice before using it in a product you sell.** MindAR (MIT licence) remains the default.
+
 ### Gallery: one QR code for many artworks
 
 Like Kivicube's collections, the dashboard shows a **Gallery QR code** once two or more experiences are published. Visitors scan it once and can then walk from artwork to artwork: whichever artwork is in the camera shows its own content (video, image or 3D, with its hotspots), and the header switches to that artwork's brand.

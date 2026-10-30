@@ -33,6 +33,8 @@ export default function ARExperience({ gallery = false }) {
   const { id } = useParams();
   const [params] = useSearchParams();
   const idsParam = params.get('ids') || '';
+  // Tracking engine: MindAR (default) or 8th Wall (?engine=8w).
+  const engine = params.get('engine') === '8w' ? '8w' : 'mindar';
   const [load, setLoad] = useState({ loading: true, error: null, experiences: null });
   const [attempt, setAttempt] = useState(0);
   const containerRef = useRef(null);
@@ -55,8 +57,8 @@ export default function ARExperience({ gallery = false }) {
 
   const experiences = load.experiences;
   const info = useMemo(() => (experiences ? (gallery ? galleryInfo(experiences) : experiences[0]) : null), [experiences, gallery]);
-  const preload = useExperiencePreload(experiences);
-  const ar = useWebAR({ containerRef, experiences, assets: preload.assets });
+  const preload = useExperiencePreload(experiences, engine);
+  const ar = useWebAR({ containerRef, experiences, assets: preload.assets, engine });
   const supportIssue = useMemo(() => detectARSupportIssue(), []);
   // In a gallery, the HUD follows the artwork in view once one was found.
   const hudExperience = gallery && ar.status !== 'scanning' && ar.status !== 'starting' ? ar.activeExperience : info;
@@ -121,6 +123,7 @@ export default function ARExperience({ gallery = false }) {
       <ARSplash
         experience={info}
         artworks={gallery ? experiences : null}
+        engine={engine}
         progress={preload.progress}
         ready={Boolean(preload.assets)}
         loadError={preload.error}

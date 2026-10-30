@@ -1145,28 +1145,46 @@ export class ImageTrackingSession {
 
   /**
    * Fade the anchored content in or out (FADE_S) instead of popping it, so a
-   * brief loss and re-lock feels continuous. Materials keep their own opacity.
+   * brief loss and re-lock feels continuous. Only the fade level is tracked
+   * here; it is applied per draw in #drawScene and never stored in materials
+   * (content animates its own opacity, e.g. the reveal).
    */
   #fade(dt, show) {
     const target = show ? 1 : 0;
     const prev = this._fadeV ?? 0;
-    const v = prev < target ? Math.min(target, prev + dt / FADE_S) : Math.max(target, prev - dt / FADE_S);
-    this._fadeV = v;
-    this.anchor.visible = v > 0.001;
-    if (v === prev && (v === 0 || v === 1)) return;
+    this._fadeV = prev < target ? Math.min(target, prev + dt / FADE_S) : Math.max(target, prev - dt / FADE_S);
+    this.anchor.visible = this._fadeV > 0.001;
+  }
+
+  /** Render the AR scene, temporarily multiplying content opacity by the fade level. */
+  #drawScene() {
+    const v = this.fullscreen ? 1 : (this._fadeV ?? 1);
+    if (v >= 0.999) {
+      this.renderer.render(this.scene, this.camera);
+      return;
+    }
+    const saved = (this._fadeSaved ??= []);
+    saved.length = 0;
     this.anchor.traverse((o) => {
       if (!o.material) return;
       for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
-        m.userData.baseOpacity ??= m.opacity;
-        m.userData.baseTransparent ??= m.transparent;
-        m.opacity = m.userData.baseOpacity * v;
-        const transparent = m.userData.baseTransparent || v < 1;
-        if (m.transparent !== transparent) {
-          m.transparent = transparent;
+        saved.push(m, m.opacity, m.transparent);
+        m.opacity *= v;
+        if (!m.transparent) {
+          m.transparent = true;
           m.needsUpdate = true;
         }
       }
     });
+    this.renderer.render(this.scene, this.camera);
+    for (let i = 0; i < saved.length; i += 3) {
+      const m = saved[i];
+      m.opacity = saved[i + 1];
+      if (m.transparent !== saved[i + 2]) {
+        m.transparent = saved[i + 2];
+        m.needsUpdate = true;
+      }
+    }
   }
 
   /** Debug wireframe (?debug&wire=1): exact target rectangle + diagonals, on the anchor. */
@@ -1321,7 +1339,7 @@ export class ImageTrackingSession {
     const r = this.renderer;
     r.clear();
     if (frame) r.render(this.bgScene, this.bgCamera);
-    r.render(this.scene, this.camera);
+    this.#drawScene();
   }
 
   /** Raycast helper for tap interactions on anchored content. */

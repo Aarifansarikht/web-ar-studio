@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { loadMindAR } from '../ar/loadMindAR.js';
+import { loadEighthWall } from '../ar/EighthWallSession.js';
 import { mergeMindBuffers } from '../ar/mergeTargets.js';
 import { fetchWithProgress } from '../services/assetLoader.js';
 import { assetUrl } from '../utils/url.js';
@@ -15,7 +16,7 @@ const WEIGHTS = { engine: 0.3, mind: 0.15, content: 0.55 };
  * Blob URLs are revoked when the experiences change or the page unmounts.
  * @returns {{progress: number, assets: {mindBuffer: ArrayBuffer, contentUrls: string[]}|null, error: Error|null, retry: () => void}}
  */
-export function useExperiencePreload(experiences) {
+export function useExperiencePreload(experiences, engine = 'mindar') {
   const [state, setState] = useState({ progress: 0, assets: null, error: null });
   const [attempt, setAttempt] = useState(0);
 
@@ -40,28 +41,31 @@ export function useExperiencePreload(experiences) {
       report();
     };
 
+    if (engine === '8w') parts.mind.fill(1); // no compiled targets to download
     setState({ progress: 0, assets: null, error: null });
 
     (async () => {
       try {
         const [, mindBlobs, contentBlobs] = await Promise.all([
-          loadMindAR()
+          (engine === '8w' ? loadEighthWall() : loadMindAR())
             .catch(() => {
               throw new Error('The AR engine could not be downloaded. Check your connection.');
             })
             .then(() => track('engine')(1)),
-          Promise.all(
-            experiences.map((e, i) =>
-              fetchWithProgress(assetUrl(e.target.mindUrl), { signal, label: 'tracking data', onProgress: track('mind', i) }),
-            ),
-          ),
+          engine === '8w'
+            ? Promise.resolve(null) // 8th Wall builds its target data from the target images
+            : Promise.all(
+                experiences.map((e, i) =>
+                  fetchWithProgress(assetUrl(e.target.mindUrl), { signal, label: 'tracking data', onProgress: track('mind', i) }),
+                ),
+              ),
           Promise.all(
             experiences.map((e, i) =>
               fetchWithProgress(assetUrl(e.content.url), { signal, label: 'AR content', onProgress: track('content', i) }),
             ),
           ),
         ]);
-        const mindBuffer = mergeMindBuffers(await Promise.all(mindBlobs.map((b) => b.arrayBuffer())));
+        const mindBuffer = mindBlobs ? mergeMindBuffers(await Promise.all(mindBlobs.map((b) => b.arrayBuffer()))) : null;
         const contentUrls = contentBlobs.map((b) => {
           const url = URL.createObjectURL(b);
           objectUrls.push(url);
@@ -79,7 +83,7 @@ export function useExperiencePreload(experiences) {
       controller.abort();
       objectUrls.forEach((u) => URL.revokeObjectURL(u));
     };
-  }, [experiences, attempt]);
+  }, [experiences, engine, attempt]);
 
   const retry = useCallback(() => setAttempt((n) => n + 1), []);
   return { ...state, retry };
