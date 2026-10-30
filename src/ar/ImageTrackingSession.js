@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { ARError, classifyCameraError } from './environment.js';
 import { loadMindAR } from './loadMindAR.js';
 import { GyroTracker } from './GyroTracker.js';
+import { FocalCalibrator } from './FocalCalibrator.js';
 
 /** Only one camera + tracking session may run at a time. */
 let activeSession = null;
@@ -63,6 +64,10 @@ const WOBBLE_PROBE = new THREE.Vector3(0, 0, 0.15);
 // MindAR's projection is resolution-independent, so this is ~45% less work per
 // frame than 720p with no loss of alignment; the display stays at full 720p.
 const PROCESS_LONG_SIDE = 960;
+// Phone camera field of view across the *long* side of the video, in degrees
+// (typical main cameras with 16:9 video: ~63–70°). MindAR's own assumption is
+// 45° across the frame height, about half the real view in portrait.
+const CAMERA_FOV_LONG_DEG = 66;
 
 // Diagnostics: ?debug&minCF=…&beta=…&proc=…&stab=0 override tracking settings for field tuning.
 const TUNING = (() => {
@@ -75,6 +80,8 @@ const TUNING = (() => {
     minCF: num('minCF'),
     beta: num('beta'),
     processLongSide: num('proc'),
+    // &fov=<deg>: camera field of view across the long side (0 = MindAR's default).
+    fov: num('fov'),
     stabilise: q.get('stab') !== '0',
     // &live=1: show the live camera with extrapolated poses (the fallback mode).
     live: q.get('live') === '1',
@@ -275,6 +282,7 @@ export class ImageTrackingSession {
         this._gyro.start();
         if (TUNING.debug) window.__webarGyro = this._gyro; // diagnostics
       }
+      if (TUNING.debug) window.__webarSession = this; // diagnostics
       this.clock.start();
       this.renderer.setAnimationLoop(() => this.#render());
     } catch (err) {
@@ -418,6 +426,12 @@ export class ImageTrackingSession {
     // (CSS width/height, set in resize(), still control the on-screen size.)
     video.setAttribute('width', inputWidth);
     video.setAttribute('height', inputHeight);
+    // Realistic focal length (see CAMERA_FOV_LONG_DEG and vite.config.js): the
+    // value measured on this device before, else a typical phone camera. It is
+    // then measured live (FocalCalibrator) unless fixed with ?debug&fov=.
+    const fov = TUNING.fov ?? FocalCalibrator.load() ?? CAMERA_FOV_LONG_DEG;
+    const focal = fov > 0 ? Math.max(inputWidth, inputHeight) / 2 / Math.tan(THREE.MathUtils.degToRad(fov) / 2) : undefined;
+    globalThis.__mindarFocal = focal;
     this.controller = new this.Controller({
       inputWidth,
       inputHeight,
@@ -435,7 +449,12 @@ export class ImageTrackingSession {
       onUpdate: (data) => this.#onControllerUpdate(data),
     });
 
-    const { dimensions, trackingDataList } = this.controller.addImageTargetsFromBuffer(this.mindBuffer.slice(0));
+    delete globalThis.__mindarFocal;
+    const { dimensions, trackingDataList, matchingDataList } = this.controller.addImageTargetsFromBuffer(this.mindBuffer.slice(0));
+    this._matchingDataList = matchingDataList;
+    this._focalCal =
+      TUNING.fov === undefined ? new FocalCalibrator({ width: inputWidth, height: inputHeight }, this.controller.projectionTransform[0][0]) : null;
+    this.stats.fov = Math.round(this._focalCal ? this._focalCal.fovFor(this.controller.projectionTransform[0][0]) : fov);
     if (!dimensions?.length) {
       throw new ARError('engine', 'The image target data is invalid or was compiled with an incompatible version.');
     }
@@ -550,7 +569,6 @@ export class ImageTrackingSession {
     const coarse = c.tracker;
     const fine = this._fineTracker;
     const minSides = dimensions.map(([w, h]) => Math.min(w, h));
-    const focal = c.projectionTransform[0][0];
     let level = 1;
     const trackAndUpdate = c._trackAndUpdate.bind(c);
     // Also records whether this frame was actually tracked (vs. a miss that
@@ -558,7 +576,8 @@ export class ImageTrackingSession {
     c._trackAndUpdate = async (input, modelView, index) => {
       if (fine) {
         const depth = modelView[2][3];
-        const apparent = depth > 0 ? (focal * minSides[index]) / depth : 0;
+        // Current focal length: it may have been recalibrated during the session.
+        const apparent = depth > 0 ? (c.projectionTransform[0][0] * minSides[index]) / depth : 0;
         if (level === 1 && apparent > FINE_ENTER_PX) level = 0;
         else if (level === 0 && apparent < FINE_EXIT_PX) level = 1;
         c.tracker = level === 0 ? fine : coarse;
@@ -571,6 +590,7 @@ export class ImageTrackingSession {
       // drop the lock so the image is re-detected at its true position.
       if (TUNING.drift) this.#debugKick(modelView);
       const { worldCoords, screenCoords } = c.tracker.track(input, modelView, index);
+      this.#calibrateFocal(worldCoords, screenCoords, index);
       const visible = this.#visibleTrackPoints(c, modelView, index);
       const ratio = visible > 0 ? worldCoords.length / visible : 0;
       this.#noteTrackQuality(ratio, worldCoords.length);
@@ -585,6 +605,57 @@ export class ImageTrackingSession {
       return result;
     };
     void trackAndUpdate; // MindAR's version (replaced above)
+  }
+
+  /**
+   * Feed the camera calibration and apply a newly measured focal length once
+   * it differs noticeably from the one in use (see FocalCalibrator.js).
+   */
+  #calibrateFocal(worldCoords, screenCoords, index) {
+    const cal = this._focalCal;
+    if (!cal || worldCoords.length < 12) return;
+    cal.observe(worldCoords, screenCoords, this.targets[index]?.width ?? 1);
+    this._calFrames = (this._calFrames ?? 0) + 1;
+    if (this._calFrames % 15) return;
+    const measured = cal.result();
+    const c = this.controller;
+    const current = c.projectionTransform[0][0];
+    this.stats.fovMeasured = measured ? Math.round(cal.fovFor(measured)) : null;
+    if (!measured || Math.abs(measured - current) / current < 0.03) return;
+    this.#setFocal(measured);
+    FocalCalibrator.save(cal.fovFor(measured));
+  }
+
+  /** Switch the tracker, pose estimator (worker) and renderer to a new focal length. */
+  #setFocal(focal) {
+    const c = this.controller;
+    c.projectionTransform[0][0] = focal; // shared with both trackers
+    c.projectionTransform[1][1] = focal;
+    c.projectionMatrix = c._glProjectionMatrix({
+      projectionTransform: c.projectionTransform,
+      width: c.inputWidth,
+      height: c.inputHeight,
+      near: 10,
+      far: 100000,
+    });
+    c.worker.postMessage({
+      type: 'setup',
+      inputWidth: c.inputWidth,
+      inputHeight: c.inputHeight,
+      projectionTransform: c.projectionTransform,
+      debugMode: c.debugMode,
+      matchingDataList: this._matchingDataList,
+    });
+    this._focalCal.focal = focal;
+    this.stats.fov = Math.round(this._focalCal.fovFor(focal));
+    // MindAR refines each pose from the previous one; a pose from the old lens
+    // model keeps it in a wrong solution, so re-detect from scratch (the content
+    // stays up during MindAR's miss tolerance).
+    for (const st of c.trackingStates) st.isTracking = false;
+    // Poses estimated with the old lens model must not be blended with new ones.
+    this._seg++;
+    this._stabInit = false;
+    this.resize();
   }
 
   /** Number of the tracker's template points that project inside the camera frame for this pose. */

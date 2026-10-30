@@ -21,6 +21,12 @@ import basicSsl from '@vitejs/plugin-basic-ssl';
  *    frame's top-left corner, so a close-up of the top-left or bottom-left of
  *    the image (centre beyond the right/bottom edge) was never recognised.
  *    The vote range now extends two frame sizes beyond every edge.
+ *  - Camera focal length: MindAR assumes a 45° field of view across the frame
+ *    *height*. Held upright (portrait) that is the long side, so the assumed
+ *    lens is about twice too narrow and tilted views get the wrong
+ *    perspective (content slides off the corners). The session sets a
+ *    realistic focal length (globalThis.__mindarFocal) before creating the
+ *    controller; the tracker, the pose estimator and the renderer all use it.
  *  - Let the session decide when the tracking loop starts its next frame
  *    (controller.nextFrameHook): as soon as the camera delivers a new frame,
  *    instead of waiting for the next screen refresh after every frame.
@@ -43,6 +49,8 @@ function mindarTrackingTuning(level, detectWindow) {
   const LEVEL_ORIGINAL = 'this.trackingKeyframeList.push(e[l][Y5]);';
   const LEVEL_TUNED = 'this.trackingKeyframeList.push(e[l][globalThis.__mindarTrackLevel ?? Y5]);';
   const WAIT_ORIGINAL = 'this.onUpdate({ type: "processDone" }), await rd.nextFrame();';
+  const FOCAL_ORIGINAL = 'p = this.inputHeight / 2 / Math.tan(h / 2);';
+  const FOCAL_TUNED = 'p = globalThis.__mindarFocal ?? this.inputHeight / 2 / Math.tan(h / 2);';
   const WAIT_TUNED = 'this.onUpdate({ type: "processDone" }), await (this.nextFrameHook ? this.nextFrameHook() : rd.nextFrame());';
   return {
     name: 'mindar-tracking-tuning',
@@ -50,7 +58,7 @@ function mindarTrackingTuning(level, detectWindow) {
     transform(code, id) {
       // Dev requests carry a version query (?v=…); production ids don't.
       if (!/mind-ar[\\/]dist[\\/]controller-mGt1s8dJ\.js$/.test(id.split('?')[0])) return null;
-      if (!code.includes(ORIGINAL) || !code.includes(CROP_ORIGINAL) || !code.includes(LEVEL_ORIGINAL) || !code.includes(WAIT_ORIGINAL) || !WORKER_RE.test(code)) {
+      if (!code.includes(ORIGINAL) || !code.includes(CROP_ORIGINAL) || !code.includes(LEVEL_ORIGINAL) || !code.includes(WAIT_ORIGINAL) || !code.includes(FOCAL_ORIGINAL) || !WORKER_RE.test(code)) {
         throw new Error('[mindar-tracking-tuning] tracker code not found — mind-ar version changed? Re-check the patch.');
       }
       if (level === 1) return null;
@@ -58,7 +66,8 @@ function mindarTrackingTuning(level, detectWindow) {
         .replace(ORIGINAL, 'Z5 = 6, B5 = 1, H5 = 12, _5 = 1, U5 = 0.8, Y5 = 1,')
         .replace(CROP_ORIGINAL, detectWindow === 'small' ? CROP_ORIGINAL : CROP_TUNED)
         .replace(LEVEL_ORIGINAL, LEVEL_TUNED)
-        .replace(WAIT_ORIGINAL, WAIT_TUNED);
+        .replace(WAIT_ORIGINAL, WAIT_TUNED)
+        .replace(FOCAL_ORIGINAL, FOCAL_TUNED);
       return { code: tuned, map: null };
     },
   };
