@@ -31,7 +31,7 @@ record *stable*, *wireframe on edges*, *drift*, *jitter* and *recovery*:
 | 1 | Front-facing | Phone parallel to the print, ~40 cm |
 | 2 | 15° | Tilt the phone ~15° left/right and up/down |
 | 3 | 30° | Same, ~30° |
-| 4 | 45° | Same, ~45°. In the first seconds the camera calibrates: \`fov … (measured …)\` appears and is applied once |
+| 4 | 45° | Same, ~45°. In the first seconds the camera calibrates: `fov … (measured …)` appears and is applied once |
 | 5 | 60° | Same, ~60° (MindAR's practical limit; lock may drop) |
 | 6 | Distances | 20 cm (close-up / one corner) → 1 m |
 | 7 | Slow movement | Slow arc around the print |
@@ -55,7 +55,7 @@ camera with generated `.y4m` feeds:
 Main metrics:
 
 - `edge-gap.mjs`: average gap in px between the magenta test overlay
-  (\`aligntest\` experience) and the printed edges.
+  (`aligntest` experience) and the printed edges.
 - `lag-test.mjs`: misalignment during fast motion.
 - `partial.mjs`: share of time locked.
 - `stability.mjs`: wobble when still, re-lock time.
@@ -65,14 +65,14 @@ Debug-only switches for A/B tests:
 
 | Switch | Effect |
 |---|---|
-| \`fov=<deg>\` | Fixed camera FOV (0 = MindAR default) |
-| \`stall=1\` | Pauses the tracker 0.6 s every 3 s |
-| \`staleHide=0\` | Old freeze-last-pose behaviour |
-| \`noise=<deg>\` | Injects tracker noise |
-| \`fit=0\` | Causal smoothing only |
-| \`gyro=1\` | Experimental gyroscope fusion |
-| \`minTrack=<0..1>\` | Anti-drift gate threshold |
-| \`drift=1\` | Knocks the pose off every 3 s |
+| `fov=<deg>` | Fixed camera FOV (0 = MindAR default) |
+| `stall=1` | Pauses the tracker 0.6 s every 3 s |
+| `staleHide=0` | Old freeze-last-pose behaviour |
+| `noise=<deg>` | Injects tracker noise |
+| `fit=0` | Causal smoothing only |
+| `gyro=1` | Experimental gyroscope fusion |
+| `minTrack=<0..1>` | Anti-drift gate threshold |
+| `drift=1` | Knocks the pose off every 3 s |
 
 Latest results (simulated, see README "Tracking behaviour"):
 
