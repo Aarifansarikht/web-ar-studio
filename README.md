@@ -118,9 +118,9 @@ NODE_ENV=production ADMIN_TOKEN=<long-random-secret> DATA_DIR=/var/lib/webar POR
 | `/ar/:id` | Public QR landing page and AR session |
 | `/gallery` | **Gallery**: one link / QR code that recognises every published artwork (`?ids=a,b,c` picks and orders them) |
 
-### 8th Wall engine (optional: `?engine=8w`)
+### 8th Wall engine (default; MindAR with `?engine=mindar`)
 
-Any AR link (`/ar/<id>`, `/gallery`) can run on the **8th Wall engine** instead of MindAR by adding `?engine=8w`. Niantic Spatial made it free in 2026; the engine binary is in `public/external/xr`, copied from the npm package `@8thwall/engine-binary`.
+AR links (`/ar/<id>`, `/gallery`) run on the **8th Wall engine** by default. Add `?engine=mindar` to use MindAR instead; MindAR is still used to compile and grade targets in the admin. Niantic Spatial made it free in 2026; the engine binary is in `public/external/xr`, copied from the npm package `@8thwall/engine-binary`.
 
 - `src/ar/EighthWallSession.js` has the same interface as `ImageTrackingSession`, so content, hotspots, the gallery and full screen work unchanged.
 - Target data is built in the browser from each experience's target image (3:4 crop, 480×640 greyscale; landscape images rotated to portrait). No extra files are needed per experience.
@@ -145,7 +145,7 @@ Measured on the same simulated feeds (average gap between the overlay and the pr
   - No modifying or reverse engineering it.
   - No building a product that competes with it.
 - It can be terminated with 5 days' notice.
-- **Get legal advice before using it in a product you sell.** MindAR (MIT licence) remains the default.
+- **Get legal advice before using it in a product you sell.** MindAR (MIT licence) remains available with `?engine=mindar`.
 
 ### Gallery: one QR code for many artworks
 

@@ -120,7 +120,7 @@ export class EighthWallSession {
     this.displayTarget = -1;
     this.stopped = false;
     this.clock = new THREE.Clock(false);
-    this.stats = { engine: '8th Wall', trackFps: 0 };
+    this.stats = { engine: '8th Wall', trackFps: 0, tracking: false, target: -1 };
     this._updates = 0;
     this._statsAt = 0;
     this._m = new THREE.Matrix4();

@@ -33,8 +33,8 @@ export default function ARExperience({ gallery = false }) {
   const { id } = useParams();
   const [params] = useSearchParams();
   const idsParam = params.get('ids') || '';
-  // Tracking engine: MindAR (default) or 8th Wall (?engine=8w).
-  const engine = params.get('engine') === '8w' ? '8w' : 'mindar';
+  // Tracking engine: 8th Wall (default) or MindAR (?engine=mindar).
+  const engine = params.get('engine') === 'mindar' ? 'mindar' : '8w';
   const [load, setLoad] = useState({ loading: true, error: null, experiences: null });
   const [attempt, setAttempt] = useState(0);
   const containerRef = useRef(null);
