@@ -39,6 +39,10 @@ const DELAY_MARGIN_S = 0.012;
 // Extrapolation is only a fallback (tracker hiccup, or browsers without
 // requestVideoFrameCallback): capped so content can never fly off.
 const MAX_PREDICT_S = 0.12;
+// A tracker gap shorter than this is bridged by continuing the recent motion
+// (content keeps gliding with the camera); longer gaps fade the content out.
+const STALE_BRIDGE_S = 0.25;
+const FADE_S = 0.15; // content fade in/out time when tracking stops/resumes
 const VELOCITY_SMOOTHING = 0.55; // weight of the newest velocity sample
 const POSE_HISTORY = 40;
 // Tracking quality gate (anti-drift): share of the template points visible in
@@ -1016,10 +1020,10 @@ export class ImageTrackingSession {
       // No tracker result for this frame yet (tracker stalled: blur, re-detection,
       // a busy phone). Showing the last pose would freeze the content while the
       // camera image moves on (a doubled image): hide it until poses resume.
-      if (t - last.t > MAX_PREDICT_S && TUNING.staleHide !== false) return false;
-      if (fit) return this.#fitPose(Math.min(t, last.t + MAX_PREDICT_S), last.seg, out);
+      if (t - last.t > STALE_BRIDGE_S && TUNING.staleHide !== false) return false;
+      if (fit) return this.#fitPose(Math.min(t, last.t + STALE_BRIDGE_S), last.seg, out);
       this.displayTarget = last.target;
-      const h = TUNING.predict === false ? 0 : Math.min(MAX_PREDICT_S, t - last.t);
+      const h = TUNING.predict === false ? 0 : Math.min(STALE_BRIDGE_S, t - last.t);
       this._gp.copy(last.p).addScaledVector(this._vel, h);
       this._gq.copy(last.q);
       const w = this._angVel.length();
@@ -1099,7 +1103,8 @@ export class ImageTrackingSession {
       goal = this._goal;
       exact = true;
     } else {
-      this.anchor.visible = false;
+      // No pose for this frame: fade out at the last shown pose.
+      this.#fade(dt, false);
       return;
     }
 
@@ -1135,7 +1140,33 @@ export class ImageTrackingSession {
         this.#recordWobble(this._jerk, this.anchor.matrix);
       }
     }
-    this.anchor.visible = true;
+    this.#fade(dt, true);
+  }
+
+  /**
+   * Fade the anchored content in or out (FADE_S) instead of popping it, so a
+   * brief loss and re-lock feels continuous. Materials keep their own opacity.
+   */
+  #fade(dt, show) {
+    const target = show ? 1 : 0;
+    const prev = this._fadeV ?? 0;
+    const v = prev < target ? Math.min(target, prev + dt / FADE_S) : Math.max(target, prev - dt / FADE_S);
+    this._fadeV = v;
+    this.anchor.visible = v > 0.001;
+    if (v === prev && (v === 0 || v === 1)) return;
+    this.anchor.traverse((o) => {
+      if (!o.material) return;
+      for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+        m.userData.baseOpacity ??= m.opacity;
+        m.userData.baseTransparent ??= m.transparent;
+        m.opacity = m.userData.baseOpacity * v;
+        const transparent = m.userData.baseTransparent || v < 1;
+        if (m.transparent !== transparent) {
+          m.transparent = transparent;
+          m.needsUpdate = true;
+        }
+      }
+    });
   }
 
   /** Debug wireframe (?debug&wire=1): exact target rectangle + diagonals, on the anchor. */
