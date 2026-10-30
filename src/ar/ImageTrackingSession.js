@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { ARError, classifyCameraError } from './environment.js';
 import { loadMindAR } from './loadMindAR.js';
+import { GyroTracker } from './GyroTracker.js';
 
 /** Only one camera + tracking session may run at a time. */
 let activeSession = null;
@@ -48,6 +49,9 @@ const POSE_HISTORY = 40;
 // the fit becomes a plain weighted mean (no slope term: much less noise).
 const FIT_SIGMA_STILL = 0.3;
 const FIT_SIGMA_MOVE = 0.07;
+// With the gyroscope (see GyroTracker.js), the artwork's orientation in the
+// world frame is constant, so rotation noise is averaged over a long window.
+const FIT_SIGMA_GYRO_ROT = 0.45;
 // Point used for the wobble diagnostic: 0.15 image widths in front of the centre.
 const WOBBLE_PROBE = new THREE.Vector3(0, 0, 0.15);
 // The tracker analyses a downscaled copy of the camera frame (long side in px).
@@ -72,7 +76,10 @@ const TUNING = (() => {
     predict: q.get('predict') !== '0',
     // &fit=0: interpolate the causally stabilised poses instead (A/B).
     fit: q.get('fit') !== '0',
-    // &noise=<deg>: add random tracking noise (rotation deg, position deg/100 of distance) to test smoothing.
+    // &gyro=0: camera-only tracking (A/B).
+    gyro: q.get('gyro') !== '0',
+    // &noise=<deg>: add random tracking noise to test smoothing: rotation <deg>, position <deg>/8 % of the
+    // distance (the ratio measured on the tracker: rotation p90 ≈ 2–5°, position ≈ 0.25–0.6 %).
     noise: num('noise'),
   };
 })();
@@ -190,6 +197,7 @@ export class ImageTrackingSession {
       s0: new THREE.Vector3(),
       a: new THREE.Vector3(),
       b: new THREE.Vector3(),
+      g: new THREE.Quaternion(),
     };
     this._jerk = [];
     this._jerkT = 0;
@@ -253,6 +261,11 @@ export class ImageTrackingSession {
       this.#onVideoResize = () => this.#handleVideoResize();
       this.video.addEventListener('resize', this.#onVideoResize);
 
+      if (TUNING.gyro !== false && this._delayed) {
+        this._gyro = new GyroTracker();
+        this._gyro.start();
+        if (TUNING.debug) window.__webarGyro = this._gyro; // diagnostics
+      }
       this.clock.start();
       this.renderer.setAnimationLoop(() => this.#render());
     } catch (err) {
@@ -569,6 +582,7 @@ export class ImageTrackingSession {
       this._trackedMatrix.fromArray(worldMatrix).multiply(this.targets[targetIndex].post);
       this._trackedMatrix.decompose(this._rawP, this._rawQ, this._rawS);
       if (TUNING.noise) this.#addTestNoise(TUNING.noise);
+      this._gyro?.observe(this._inputT, this._rawQ);
       if (!this.tracking) {
         this._stabInit = false; // first frame of a lock: no history
         this._seg++;
@@ -696,14 +710,31 @@ export class ImageTrackingSession {
    * Weighted local-linear fit of the raw poses of segment `seg` around time t
    * (see FIT_SIGMA_*). Rotation is fitted as rotation vectors relative to the
    * sample nearest t. Writes the pose at t into `out`.
+   *
+   * With the gyroscope calibrated, poses are first expressed in a world frame
+   * (the phone's own rotation removed): there the artwork's orientation is
+   * constant, so rotation is averaged over a much longer window, and camera
+   * turns no longer count as motion for position either. The result is
+   * rotated back with the exact gyroscope orientation of the displayed frame.
    */
   #fitPose(t, seg, out) {
     const P = this._poses;
     const F = this._fit;
+    const gyro = this._gyro?.enabled ? this._gyro : null;
     let ref = null;
     let best = Infinity;
     for (const e of P) {
       if (e.seg !== seg) continue;
+      e.wp ??= new THREE.Vector3();
+      e.wq ??= new THREE.Quaternion();
+      if (gyro) {
+        gyro.orientationAt(e.t - gyro.lag, undefined, F.g);
+        e.wq.copy(F.g).multiply(e.rq);
+        e.wp.copy(e.rp).applyQuaternion(F.g);
+      } else {
+        e.wq.copy(e.rq);
+        e.wp.copy(e.rp);
+      }
       const d = Math.abs(e.t - t);
       if (d < best) {
         best = d;
@@ -712,72 +743,94 @@ export class ImageTrackingSession {
     }
     if (!ref) return false;
     this.displayTarget = ref.target;
-    F.qInv.copy(ref.rq).invert();
+    F.qInv.copy(ref.wq).invert();
     const { smoothstep, lerp, degToRad } = THREE.MathUtils;
-    let sigma = FIT_SIGMA_MOVE;
-    let moving = 1;
+    let sigmaP = FIT_SIGMA_MOVE;
+    let sigmaR = FIT_SIGMA_MOVE;
+    let movingP = 1;
+    let movingR = 1;
     for (let pass = 0; pass < 2; pass++) {
-      let S0 = 0;
-      let S1 = 0;
-      let S2 = 0;
+      const SP = [0, 0, 0];
+      const SR = [0, 0, 0];
       F.p0.set(0, 0, 0);
       F.p1.set(0, 0, 0);
       F.r0.set(0, 0, 0);
       F.r1.set(0, 0, 0);
       F.s0.set(0, 0, 0);
-      const reach = 2.5 * sigma;
+      const reach = 2.5 * Math.max(sigmaP, sigmaR);
       for (const e of P) {
         if (e.seg !== seg) continue;
         const x = e.t - t;
         if (x < -reach || x > reach) continue;
-        const w = Math.exp(-0.5 * (x / sigma) ** 2);
+        const wP = Math.exp(-0.5 * (x / sigmaP) ** 2);
+        const wR = Math.exp(-0.5 * (x / sigmaR) ** 2);
         // Rotation vector of ref^-1 * q.
-        F.dq.copy(F.qInv).multiply(e.rq);
+        F.dq.copy(F.qInv).multiply(e.wq);
         if (F.dq.w < 0) F.dq.set(-F.dq.x, -F.dq.y, -F.dq.z, -F.dq.w);
         const sinHalf = Math.sqrt(Math.max(0, 1 - F.dq.w * F.dq.w));
         const angle = 2 * Math.atan2(sinHalf, F.dq.w);
         F.r.set(F.dq.x, F.dq.y, F.dq.z).multiplyScalar(sinHalf > 1e-9 ? angle / sinHalf : 2);
-        S0 += w;
-        S1 += w * x;
-        S2 += w * x * x;
-        F.p0.addScaledVector(e.rp, w);
-        F.p1.addScaledVector(e.rp, w * x);
-        F.r0.addScaledVector(F.r, w);
-        F.r1.addScaledVector(F.r, w * x);
-        F.s0.addScaledVector(e.rs, w);
+        SP[0] += wP;
+        SP[1] += wP * x;
+        SP[2] += wP * x * x;
+        SR[0] += wR;
+        SR[1] += wR * x;
+        SR[2] += wR * x * x;
+        F.p0.addScaledVector(e.wp, wP);
+        F.p1.addScaledVector(e.wp, wP * x);
+        F.s0.addScaledVector(e.rs, wP);
+        F.r0.addScaledVector(F.r, wR);
+        F.r1.addScaledVector(F.r, wR * x);
       }
-      if (S0 <= 0) return false;
-      const det = S0 * S2 - S1 * S1;
-      const linear = det > 1e-12 * Math.max(1, S0 * S0);
+      if (SP[0] <= 0 || SR[0] <= 0) return false;
       // Value at t: a = (S2*Y0 - S1*Y1)/det; slope: b = (S0*Y1 - S1*Y0)/det.
-      const fitInto = (a, b, y0, y1) => {
-        if (linear) {
-          a.copy(y0).multiplyScalar(S2).addScaledVector(y1, -S1).divideScalar(det);
-          // Blend towards the weighted mean as motion stops.
-          if (pass === 1 && moving < 1) a.lerp(this._fitMean.copy(y0).divideScalar(S0), 1 - moving);
-          b.copy(y1).multiplyScalar(S0).addScaledVector(y0, -S1).divideScalar(det);
+      // Blends towards the weighted mean as motion stops (final pass).
+      const fitInto = (S, a, b, y0, y1, moving) => {
+        const det = S[0] * S[2] - S[1] * S[1];
+        if (det > 1e-12 * Math.max(1, S[0] * S[0])) {
+          a.copy(y0).multiplyScalar(S[2]).addScaledVector(y1, -S[1]).divideScalar(det);
+          if (pass === 1 && moving < 1) a.lerp(this._fitMean.copy(y0).divideScalar(S[0]), 1 - moving);
+          b.copy(y1).multiplyScalar(S[0]).addScaledVector(y0, -S[1]).divideScalar(det);
         } else {
-          a.copy(y0).divideScalar(S0);
+          a.copy(y0).divideScalar(S[0]);
           b.set(0, 0, 0);
         }
       };
       if (pass === 0) {
-        // Speed from a short-window fit picks the window for the final fit.
-        fitInto(F.a, F.b, F.p0, F.p1);
+        // Speed from a short-window fit picks the windows for the final fit.
+        fitInto(SP, F.a, F.b, F.p0, F.p1, 1);
         const rel = F.b.length() / Math.max(1e-6, F.a.length());
-        fitInto(F.a, F.b, F.r0, F.r1);
+        fitInto(SR, F.a, F.b, F.r0, F.r1, 1);
         const rot = F.b.length();
-        moving = Math.max(smoothstep(rel, 0.03, 0.3), smoothstep(rot, degToRad(4), degToRad(40)));
-        sigma = lerp(FIT_SIGMA_STILL, FIT_SIGMA_MOVE, moving);
+        movingP = smoothstep(rel, 0.03, 0.3);
+        movingR = smoothstep(rot, degToRad(4), degToRad(40));
+        if (gyro) {
+          // World frame: only real translation moves the position, and the
+          // artwork's orientation should not change at all.
+          sigmaP = lerp(FIT_SIGMA_STILL, FIT_SIGMA_MOVE, movingP);
+          sigmaR = lerp(FIT_SIGMA_GYRO_ROT, FIT_SIGMA_STILL, movingR);
+        } else {
+          const moving = Math.max(movingP, movingR);
+          movingP = moving;
+          movingR = moving;
+          sigmaP = lerp(FIT_SIGMA_STILL, FIT_SIGMA_MOVE, moving);
+          sigmaR = sigmaP;
+        }
         continue;
       }
-      fitInto(this._gp, F.b, F.p0, F.p1);
-      fitInto(F.a, F.b, F.r0, F.r1);
+      fitInto(SP, this._gp, F.b, F.p0, F.p1, movingP);
+      fitInto(SR, F.a, F.b, F.r0, F.r1, movingR);
       const angle = F.a.length();
       if (angle > 1e-9) this._gq.setFromAxisAngle(F.a.divideScalar(angle), angle);
       else this._gq.identity();
-      this._gq.premultiply(ref.rq);
-      this._gs.copy(F.s0).divideScalar(S0);
+      this._gq.premultiply(ref.wq);
+      this._gs.copy(F.s0).divideScalar(SP[0]);
+    }
+    if (gyro) {
+      // Back to the camera frame of the displayed frame.
+      gyro.orientationAt(t - gyro.lag, undefined, F.g).invert();
+      this._gq.premultiply(F.g);
+      this._gp.applyQuaternion(F.g);
     }
     out.compose(this._gp, this._gq, this._gs);
     return true;
@@ -831,7 +884,7 @@ export class ImageTrackingSession {
     this._tmpVel.set(g(), g(), g()).multiplyScalar(a);
     const ang = this._tmpVel.length();
     if (ang > 0) this._rawQ.premultiply(this._tmpQ.setFromAxisAngle(this._tmpVel.divideScalar(ang), ang));
-    const d = this._rawP.length() * (deg / 100);
+    const d = this._rawP.length() * (deg / 800);
     this._rawP.x += g() * d;
     this._rawP.y += g() * d;
     this._rawP.z += g() * d;
@@ -999,6 +1052,7 @@ export class ImageTrackingSession {
     }
     this.stats.delayMs = frame ? Math.round((now - frame.t) * 1000) : 0;
     this.stats.target = this.displayTarget;
+    this.stats.gyro = this._gyro ? `${this._gyro.state}${this._gyro.lastScore !== undefined ? ` ${this._gyro.lastScore.toFixed(2)}` : ''}` : 'off';
     if (frame && frame.t !== this._shownT) {
       this._shownT = frame.t;
       this._viewFrames++;
@@ -1080,6 +1134,7 @@ export class ImageTrackingSession {
     this.stopped = true;
 
     this.renderer?.setAnimationLoop(null);
+    this._gyro?.stop();
     this.resizeObserver?.disconnect();
     if (this.video && this.#onVideoResize) this.video.removeEventListener('resize', this.#onVideoResize);
 

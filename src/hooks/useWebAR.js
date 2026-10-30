@@ -5,6 +5,7 @@ import { ARError, detectARSupportIssue } from '../ar/environment.js';
 import { addModelLighting, createARContent, modelDepth } from '../ar/content.js';
 import { HotspotLayer } from '../ar/hotspots.js';
 import { LockOnFrame } from '../ar/lockOn.js';
+import { requestMotionAccess } from '../ar/GyroTracker.js';
 
 /**
  * Lifecycle of one image-tracked AR session over one or more artworks.
@@ -64,6 +65,9 @@ export function useWebAR({ containerRef, experiences, assets }) {
     const container = containerRef.current;
     if (!container || !experiences?.length || !assets || startingRef.current || runtime.current) return;
     startingRef.current = true;
+    // Gyroscope for steadier tracking: must be requested inside the tap on iOS.
+    // Tracking works without it if the visitor declines.
+    requestMotionAccess();
     setError(null);
     setFullscreenState(false);
     setVideoBlocked(false);
