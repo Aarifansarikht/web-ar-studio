@@ -15,6 +15,8 @@
  * Every effect is periodic in LOOP seconds (phase `ph` = 0..2π), so videos
  * loop seamlessly. Used headless: loadArt(preset, imageUrl), then
  * renderFrame(t) returns a PNG data URL (see render script in the README).
+ * Edges are locked (see edgeLock): the border of every video is the exact
+ * artwork, so the overlay's corners and edges stay glued to the print.
  */
 const LOOP = 8;
 const COMMON = `
@@ -29,6 +31,17 @@ float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
 float sat(vec3 c){ float mx = max(c.r, max(c.g, c.b)); float mn = min(c.r, min(c.g, c.b)); return mx > 0.0 ? (mx - mn) / mx : 0.0; }
 vec3 screen(vec3 a, vec3 b){ return 1.0 - (1.0 - a) * (1.0 - b); }
 vec2 rot(vec2 p, float a){ float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }
+// Edge lock: 0 at the artwork's border, 1 inside a band of EDGE_BAND (in
+// image heights). Effects fade out towards the border, so the video's edges
+// and corners are the exact printed artwork and stay glued to the print.
+const float EDGE_BAND = 0.07;
+float edgeLock(){
+  vec2 d = min(uv, 1.0 - uv);
+  d.x *= res.x / res.y;
+  return smoothstep(0.0, EDGE_BAND, min(d.x, d.y));
+}
+vec2 lockUv(vec2 q){ return uv + (q - uv) * edgeLock(); }
+vec4 pinEdges(vec3 c){ return vec4(mix(texture2D(art, uv).rgb, clamp(c, 0.0, 1.0), edgeLock()), 1.0); }
 `;
 
 const PRESETS = {
@@ -71,6 +84,7 @@ void main(){
   float down = smoothstep(0.1, 0.95, uv.y);
   q.x += sin(uv.y * 16.0 - ph * 2.0 + uv.x * 3.0) * 0.012 * down;
   q.y += cos(uv.x * 11.0 - ph + uv.y * 4.0) * 0.004 * down;
+  q = lockUv(q);
   vec3 a = texture2D(art, q).rgb;
   float ink = smoothstep(0.93, 0.72, lum(a));
   // Deep-sea water with light rays from the surface and moving caustics.
@@ -98,9 +112,7 @@ void main(){
       c += vec3(0.45, 0.9, 1.0) * (core + glow) * tw * (layer == 0 ? 0.8 : 1.0);
     }
   }
-  vec2 v = uv - 0.5;
-  c *= 1.0 - dot(v, v) * 0.6;
-  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+  gl_FragColor = pinEdges(c);
 }` },
 
   // Klimt, The Kiss: the gold leaf glitters and shimmers, a bright sheen
@@ -112,6 +124,7 @@ void main(){
   float meadow = smoothstep(0.62, 0.85, uv.y);
   q.x += sin(uv.y * 40.0 + ph * 2.0 + uv.x * 10.0) * 0.003 * meadow;
   q.y += sin(uv.x * 30.0 - ph * 2.0) * 0.002 * meadow;
+  q = lockUv(q);
   vec3 a = texture2D(art, q).rgb;
   // Gold leaf: warm, saturated, bright.
   float gold = smoothstep(0.08, 0.25, (a.r + a.g) * 0.5 - a.b) * smoothstep(0.25, 0.5, lum(a));
@@ -153,9 +166,7 @@ void main(){
       c = screen(c, vec3(1.0, 0.8, 0.35) * (smoothstep(0.16, 0.05, dd) * 0.55 + exp(-dd * dd * 30.0) * 0.25) * tw);
     }
   }
-  vec2 v = uv - 0.5;
-  c *= 1.0 - dot(v, v) * 0.35;
-  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+  gl_FragColor = pinEdges(c);
 }` },
 
   // Van Gogh, Almond Blossoms: branches sway in the wind, the brushstroke
@@ -168,6 +179,7 @@ void main(){
   float reach = clamp(length((uv - vec2(0.78, 1.05)) * vec2(aspect, 1.0)) / 1.3, 0.0, 1.0);
   q.x += sin(ph * 2.0 + uv.x * 3.0 + uv.y * 2.0) * 0.010 * reach * reach;
   q.y += cos(ph * 2.0 + uv.x * 2.5) * 0.006 * reach * reach;
+  q = lockUv(q);
   vec3 a = texture2D(art, q).rgb;
   // Sky: blue brushstrokes flow and shimmer.
   float sky = smoothstep(0.02, 0.12, a.b - a.r) * smoothstep(0.3, 0.6, lum(a));
@@ -207,7 +219,7 @@ void main(){
   // Warm sunlight drifting across once per loop.
   float s = fract(ph / (2.0 * PI));
   c += vec3(1.0, 0.9, 0.7) * exp(-pow((uv.x - (s * 1.6 - 0.3)) * 3.0, 2.0)) * 0.08;
-  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+  gl_FragColor = pinEdges(c);
 }` },
 };
 

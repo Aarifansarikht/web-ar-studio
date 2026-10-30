@@ -11,12 +11,14 @@
   },
   "content": {
     "type": "video",
-    "url": "/uploads/fjyd6wyh65/content-a2b0f98da1.mp4",
+    "url": "/uploads/fjyd6wyh65/content-c5b99d0025.mp4",
     "fileName": "starry-night-living.mp4",
     "fit": "target",
     "loop": true,
     "startMuted": true,
     "playAnimations": true,
+    "alignToTarget": false,
+    "depth": 1,
     "aspect": 1
   },
   "placement": {
@@ -33,25 +35,29 @@
       "id": "moon",
       "label": "Crescent moon",
       "x": 0.906,
-      "y": 0.171
+      "y": 0.171,
+      "z": 0
     },
     {
       "id": "swirl",
       "label": "The swirling sky",
       "x": 0.49,
-      "y": 0.33
+      "y": 0.33,
+      "z": 0
     },
     {
       "id": "cypress",
       "label": "Cypress tree",
       "x": 0.2,
-      "y": 0.53
+      "y": 0.53,
+      "z": 0
     },
     {
       "id": "church",
       "label": "Village church",
       "x": 0.568,
-      "y": 0.737
+      "y": 0.737,
+      "z": 0
     }
   ],
   "target": {
@@ -63,5 +69,5 @@
     "featureCount": 5246
   },
   "createdAt": "2026-10-28T12:03:28.915Z",
-  "updatedAt": "2026-10-29T05:12:31.082Z"
+  "updatedAt": "2026-10-30T09:57:35.643Z"
 }
