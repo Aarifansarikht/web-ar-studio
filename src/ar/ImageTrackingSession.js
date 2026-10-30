@@ -40,6 +40,11 @@ const DELAY_MARGIN_S = 0.012;
 const MAX_PREDICT_S = 0.12;
 const VELOCITY_SMOOTHING = 0.55; // weight of the newest velocity sample
 const POSE_HISTORY = 40;
+// Tracking quality gate (anti-drift): share of the template points visible in
+// the frame that must match for a frame to count as tracked.
+const MIN_TRACK_RATIO = 0.35; // on a running average (TRACK_QUALITY_ALPHA) over recent frames
+const TRACK_QUALITY_ALPHA = 0.2;
+const MIN_VISIBLE_FOR_GATE = 12;
 // Centred pose fit (delayed mode). Each displayed frame's pose is a weighted
 // linear fit over the raw tracker poses before *and after* it (the delay makes
 // later ones available). A linear fit follows steady motion without lag, so
@@ -76,8 +81,11 @@ const TUNING = (() => {
     predict: q.get('predict') !== '0',
     // &fit=0: interpolate the causally stabilised poses instead (A/B).
     fit: q.get('fit') !== '0',
-    // &gyro=0: camera-only tracking (A/B).
-    gyro: q.get('gyro') !== '0',
+    minTrack: num('minTrack'),
+    drift: q.get('drift') === '1',
+    // &gyro=1: gyroscope fusion (experimental, off by default: on a real phone the
+    // camera/gyroscope timing differs per device and it pulled content off the image).
+    gyro: q.get('gyro') === '1',
     // &noise=<deg>: add random tracking noise to test smoothing: rotation <deg>, position <deg>/8 % of the
     // distance (the ratio measured on the tracker: rotation p90 ≈ 2–5°, position ≈ 0.25–0.6 %).
     noise: num('noise'),
@@ -182,6 +190,7 @@ export class ImageTrackingSession {
     this._snapT = 0;
     this._delayed = false;
     this._shownT = 0;
+    this._trackQ = 0.8;
     this._viewFrames = 0;
     this._rawP = new THREE.Vector3();
     this._rawQ = new THREE.Quaternion();
@@ -261,7 +270,7 @@ export class ImageTrackingSession {
       this.#onVideoResize = () => this.#handleVideoResize();
       this.video.addEventListener('resize', this.#onVideoResize);
 
-      if (TUNING.gyro !== false && this._delayed) {
+      if (TUNING.gyro === true && this._delayed) {
         this._gyro = new GyroTracker();
         this._gyro.start();
         if (TUNING.debug) window.__webarGyro = this._gyro; // diagnostics
@@ -555,10 +564,68 @@ export class ImageTrackingSession {
         c.tracker = level === 0 ? fine : coarse;
         this.stats.trackLevel = level === 0 ? 'fine' : 'coarse';
       }
-      const result = await trackAndUpdate(input, modelView, index);
+      // Same as MindAR's _trackAndUpdate, plus a quality gate against drift:
+      // a lock that slid off the image still matches a few template points
+      // (MindAR accepts 4), so it would stay "locked" in the wrong place.
+      // Require a share of the points that should be visible to match; else
+      // drop the lock so the image is re-detected at its true position.
+      if (TUNING.drift) this.#debugKick(modelView);
+      const { worldCoords, screenCoords } = c.tracker.track(input, modelView, index);
+      const visible = this.#visibleTrackPoints(c, modelView, index);
+      const ratio = visible > 0 ? worldCoords.length / visible : 0;
+      this.#noteTrackQuality(ratio, worldCoords.length);
+      // Running average: single blurred frames dip, a slid-off lock stays low.
+      if (visible >= MIN_VISIBLE_FOR_GATE) this._trackQ += (ratio - this._trackQ) * TRACK_QUALITY_ALPHA;
+      if (worldCoords.length < 4 || this._trackQ < (TUNING.minTrack ?? MIN_TRACK_RATIO)) {
+        this._trackQ = 0.8; // fresh start for the re-detected lock
+        return null;
+      }
+      const result = await c._workerTrackUpdate(modelView, { worldCoords, screenCoords });
       if (result) this._frameTracked = true;
       return result;
     };
+    void trackAndUpdate; // MindAR's version (replaced above)
+  }
+
+  /** Number of the tracker's template points that project inside the camera frame for this pose. */
+  #visibleTrackPoints(c, mv, index) {
+    const kf = c.tracker.trackingKeyframeList[index];
+    if (!kf) return 0;
+    const P = c.projectionTransform;
+    const w = c.inputWidth;
+    const h = c.inputHeight;
+    let n = 0;
+    for (const p of kf.points) {
+      const X = p.x / kf.scale;
+      const Y = p.y / kf.scale;
+      const z = mv[2][0] * X + mv[2][1] * Y + mv[2][3];
+      if (z <= 0) continue;
+      const u = (P[0][0] * (mv[0][0] * X + mv[0][1] * Y + mv[0][3])) / z + P[0][2];
+      const v = (P[1][1] * (mv[1][0] * X + mv[1][1] * Y + mv[1][3])) / z + P[1][2];
+      if (u >= 0 && u < w && v >= 0 && v < h) n++;
+    }
+    return n;
+  }
+
+  /** Diagnostics only (?debug&drift=1): knock the tracker's pose off by 15% of the image every 3 s. */
+  #debugKick(mv) {
+    const now = performance.now();
+    if (now - (this._kickAt ?? now) < 3000) {
+      this._kickAt ??= now;
+      return;
+    }
+    this._kickAt = now;
+    const shift = 0.15 * (this.targets[0]?.width ?? 1000);
+    mv[0][3] += shift;
+    mv[1][3] += shift * 0.5;
+  }
+
+  #noteTrackQuality(ratio, matched) {
+    const q = (this._quality ??= { sum: 0, n: 0, min: 1, matched: 0 });
+    q.sum += ratio;
+    q.n += 1;
+    q.min = Math.min(q.min, ratio);
+    q.matched += matched;
   }
 
   #onControllerUpdate(data) {
@@ -1061,6 +1128,9 @@ export class ImageTrackingSession {
     this.#updatePose(dt, frame ? frame.t : now);
     if (this.clock.elapsedTime - this._statsAt >= 1) {
       this.stats.trackFps = Math.round(this._trackFrames / (this.clock.elapsedTime - this._statsAt));
+      const q = this._quality;
+      this.stats.quality = q?.n ? `${Math.round((q.sum / q.n) * 100)}% min ${Math.round(q.min * 100)}% n${Math.round(q.matched / q.n)}` : '-';
+      this._quality = null;
       this.stats.viewFps = Math.round(this._viewFrames / (this.clock.elapsedTime - this._statsAt));
       this._viewFrames = 0;
       // Wobble: standard deviation (px) of a point in front of the image over the
