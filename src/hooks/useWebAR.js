@@ -65,9 +65,10 @@ export function useWebAR({ containerRef, experiences, assets }) {
     const container = containerRef.current;
     if (!container || !experiences?.length || !assets || startingRef.current || runtime.current) return;
     startingRef.current = true;
-    // Gyroscope for steadier tracking: must be requested inside the tap on iOS.
-    // Tracking works without it if the visitor declines.
-    requestMotionAccess();
+    // Experimental gyroscope fusion (?debug&gyro=1) needs motion access, which
+    // iOS only grants from inside the tap. Not requested otherwise.
+    const q = new URLSearchParams(window.location.search);
+    if (q.has('debug') && q.get('gyro') === '1') requestMotionAccess();
     setError(null);
     setFullscreenState(false);
     setVideoBlocked(false);
