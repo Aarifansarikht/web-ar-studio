@@ -114,6 +114,19 @@ export async function getPublicExperience(id, opts) {
   return staticJson(`/experiences/${encodeURIComponent(id)}.json`, NOT_FOUND);
 }
 
+/** All published experiences (public), for the gallery link. Optional `ids` limits and orders them. */
+export async function listPublicExperiences({ ids, ...opts } = {}) {
+  let list;
+  if ((await getDataSource()) === 'api') {
+    list = await apiRequest('/api/public/experiences', { ...opts, auth: false });
+  } else {
+    list = (await staticJson('/index.json', 'No published experiences found.')).filter((e) => e.status === 'published');
+  }
+  if (!ids?.length) return list;
+  const byId = new Map(list.map((e) => [e.id, e]));
+  return ids.map((id) => byId.get(id)).filter(Boolean);
+}
+
 export async function getHealth() {
   if ((await getDataSource()) === 'api') return apiRequest('/api/health', { auth: false });
   return { ok: true, adminAuth: 'static' };

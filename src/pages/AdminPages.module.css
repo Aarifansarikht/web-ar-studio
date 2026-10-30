@@ -128,3 +128,46 @@
     font-size: 24px;
   }
 }
+
+/* Dashboard: gallery link (one QR code for all published artworks). */
+.gallery {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 24px;
+}
+.galleryCopy h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+}
+.galleryCopy p {
+  margin: 0 0 16px;
+  color: var(--muted);
+  max-width: 60ch;
+}
+.galleryThumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.galleryThumbs img {
+  display: block;
+  height: 72px;
+  width: auto;
+  max-width: 130px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+@media (max-width: 860px) {
+  .gallery {
+    grid-template-columns: 1fr;
+  }
+}

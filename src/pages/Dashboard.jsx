@@ -5,9 +5,10 @@ import StateView from '../components/common/StateView.jsx';
 import ExperienceCard from '../components/admin/ExperienceCard.jsx';
 import { AUTH_UPDATED_EVENT } from '../components/admin/AdminAuthGate.jsx';
 import ReadOnlyNotice from '../components/admin/ReadOnlyNotice.jsx';
+import QRPanel from '../components/qr/QRPanel.jsx';
 import { useDataSource } from '../hooks/useDataSource.js';
 import { listExperiences } from '../services/experienceService.js';
-import { classifyUrl, getPublicBaseUrl } from '../utils/url.js';
+import { assetUrl, buildGalleryUrl, classifyUrl, getPublicBaseUrl } from '../utils/url.js';
 import styles from './AdminPages.module.css';
 
 export default function Dashboard() {
@@ -29,7 +30,8 @@ export default function Dashboard() {
     return () => window.removeEventListener(AUTH_UPDATED_EVENT, load);
   }, [load]);
 
-  const published = state.items.filter((e) => e.status === 'published').length;
+  const publishedItems = state.items.filter((e) => e.status === 'published');
+  const published = publishedItems.length;
 
   return (
     <div className={styles.page}>
@@ -115,11 +117,34 @@ export default function Dashboard() {
           </StateView>
         </div>
       ) : (
-        <div className={styles.grid}>
-          {state.items.map((exp) => (
-            <ExperienceCard key={exp.id} experience={exp} />
-          ))}
-        </div>
+        <>
+          {published > 1 && (
+            <section className={styles.gallery} aria-labelledby="gallery-title">
+              <div className={styles.galleryCopy}>
+                <h2 id="gallery-title">
+                  <Icon name="sparkle" size={18} /> Gallery: one QR code for every artwork
+                </h2>
+                <p>
+                  Visitors scan this code once, then point the camera at any published artwork. Each one plays its
+                  own AR content, like a museum audio guide. Put it at the entrance or beside the artworks.
+                </p>
+                <ul className={styles.galleryThumbs}>
+                  {publishedItems.map((e) => (
+                    <li key={e.id} title={e.name}>
+                      <img src={assetUrl(e.target.imageUrl)} alt={e.name} loading="lazy" />
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <QRPanel url={buildGalleryUrl()} name="AR Gallery" title="Gallery QR code" />
+            </section>
+          )}
+          <div className={styles.grid}>
+            {state.items.map((exp) => (
+              <ExperienceCard key={exp.id} experience={exp} />
+            ))}
+          </div>
+        </>
       )}
     </div>
   );

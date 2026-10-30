@@ -534,3 +534,27 @@
   font: 600 11px/1.3 ui-monospace, monospace;
   color: #7dffb0;
 }
+
+/* Gallery splash: the artworks this link recognises. */
+.artworkStrip {
+  display: flex;
+  gap: 10px;
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.artworkStrip li {
+  flex: none;
+}
+.artworkStrip img {
+  display: block;
+  height: 64px;
+  width: auto;
+  max-width: 120px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+}

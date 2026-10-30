@@ -116,6 +116,16 @@ NODE_ENV=production ADMIN_TOKEN=<long-random-secret> DATA_DIR=/var/lib/webar POR
 | `/admin/experiences/new` | Create experience |
 | `/admin/experiences/:id` | Edit, QR code, publish/unpublish, delete |
 | `/ar/:id` | Public QR landing page and AR session |
+| `/gallery` | **Gallery**: one link / QR code that recognises every published artwork (`?ids=a,b,c` picks and orders them) |
+
+### Gallery: one QR code for many artworks
+
+Like Kivicube's collections, the dashboard shows a **Gallery QR code** once two or more experiences are published. Visitors scan it once and can then walk from artwork to artwork: whichever artwork is in the camera shows its own content (video, image or 3D, with its hotspots), and the header switches to that artwork's brand.
+
+- The compiled targets of all published experiences are merged in the browser into one tracking file (`src/ar/mergeTargets.js`; a `.mind` file is msgpack `{ v, dataList }`, one entry per image). Nothing has to be recompiled when an experience is added.
+- One image is tracked at a time. The session reports which image it follows (`targetIndex`) and which image the frame on screen belongs to (`displayTarget`); only that artwork's content is visible.
+- All content is preloaded before **Start AR**, so switching artworks is instant. Detection time grows slightly with the number of artworks; keep a gallery to a few dozen images.
+- Public endpoint: `GET /api/public/experiences` (published only). On Vercel the static `index.json` is used.
 
 ### Target compilation (required by MindAR)
 
@@ -219,10 +229,11 @@ A QR code is scanned on a **different device** from the one the admin used, and 
 
 ## Demo experiences
 
-Three published demos are stored in `server/data` (local, git-ignored). Each covers one content type. All were compiled with the app's own pipeline and graded **Good**, and all were verified to track with a simulated camera.
+Five published demos are stored in `server/data` (local, git-ignored) and exported to `public/` for Vercel. All of them are in the gallery link (`/gallery`). All were compiled with the app's own pipeline and graded **Good**, and all were verified to track with a simulated camera.
 
 | Experience | ID | Target | Content | Hotspots |
 | --- | --- | --- | --- | --- |
+| Haeckel’s Jellyfish — Living Plate | `ac9tcc25am` | Ernst Haeckel, *Kunstformen der Natur*, plate 8 “Discomedusae” (1904) | **Video**: the plate itself brought to life (pulsing bells, drifting tentacles, bioluminescent glow, plankton, underwater light), rendered from the plate so it lines up exactly; 8 s seamless loop | Desmonema annasethe, Trailing tentacles, Golden bell, Seen from below |
 | The Starry Night — Living Painting | `fjyd6wyh65` | Van Gogh, *The Starry Night* (1889) | **Video**: the painting itself animated (rippling sky, colour shimmer), overlaid exactly on the target | Crescent moon, The swirling sky, Cypress tree, Village church |
 | The Great Wave — 3D Fox | `kyz99aw9q2` | Hokusai, *The Great Wave off Kanagawa* (c. 1831) | **3D model**: animated Fox (glTF) standing on the waves | The great wave, Mount Fuji, Fishing boats |
 | Girl with a Pearl Earring — Explore Vermeer | `z9u7ykh6gs` | Vermeer, *Girl with a Pearl Earring* (c. 1665) | **Image**: Vermeer's *View of Delft* as a floating panel | The pearl, Ultramarine turban, The gaze |
@@ -234,10 +245,10 @@ A tyre-ad experience in the style of the reference video. It has a premium dark 
 - **Print or display `demo-assets/ceat/ceat-poster.jpg`** and scan it. That folder also holds the AR video, splash hero, wordmark logo and hotspot coordinates.
 - **All artwork is original** and was generated for this demo: a procedural three.js tyre, the layout, and the copy. "CEAT" appears as a plain text wordmark, **not the official CEAT logo**, and the poster copy is placeholder marketing text. Before showing it publicly, replace the logo, poster, splash image and copy with official, licensed CEAT brand assets via **Admin → Manage → Branding / Target image**. The video overlay must be re-rendered to match any new poster.
 
-To try them, open `/ar/<ID>` and point the camera at the painting, either printed or on another screen. Source images: [Starry Night](https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg), [Great Wave](https://commons.wikimedia.org/wiki/File:Tsunami_by_hokusai_19th_century.jpg), [Pearl Earring](https://commons.wikimedia.org/wiki/File:1665_Girl_with_a_Pearl_Earring.jpg).
+To try them, open `/ar/<ID>` and point the camera at the painting, either printed or on another screen. Source images: [Haeckel, Discomedusae](https://commons.wikimedia.org/wiki/File:Haeckel_Discomedusae_8.jpg), [Starry Night](https://commons.wikimedia.org/wiki/File:Van_Gogh_-_Starry_Night_-_Google_Art_Project.jpg), [Great Wave](https://commons.wikimedia.org/wiki/File:Tsunami_by_hokusai_19th_century.jpg), [Pearl Earring](https://commons.wikimedia.org/wiki/File:1665_Girl_with_a_Pearl_Earring.jpg).
 
 **Credits / licences**
-- Paintings (Van Gogh, Hokusai, Vermeer incl. *View of Delft*): public domain, via Wikimedia Commons.
+- Paintings (Van Gogh, Hokusai, Vermeer incl. *View of Delft*) and Haeckel's plate: public domain, via Wikimedia Commons. The Haeckel animation was rendered for this demo from the plate itself (a WebGL shader: bell pulse, flow-field tentacle drift, glow, particles, caustics), because no free video of the same artwork exists; a downloaded animation never lines up with a printable image.
 - Fox model ([Khronos glTF-Sample-Assets](https://github.com/KhronosGroup/glTF-Sample-Assets/tree/main/Models/Fox)): model by PixelMannen (CC0); rigging & animation by tomkranis (CC BY 4.0); glTF conversion by @AsoboStudio and @scurest (CC BY 4.0). The attribution is in the experience description, which is shown to visitors.
 
 ## Target and content guidelines

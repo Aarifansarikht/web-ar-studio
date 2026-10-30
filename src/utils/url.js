@@ -13,6 +13,11 @@ export function buildExperienceUrl(id) {
   return `${getPublicBaseUrl()}/ar/${encodeURIComponent(id)}`;
 }
 
+/** One link (and QR code) that recognises every published artwork. */
+export function buildGalleryUrl() {
+  return `${getPublicBaseUrl()}/gallery`;
+}
+
 /** Resolve a server-relative asset path (e.g. /uploads/...) to an absolute URL. */
 export function assetUrl(path) {
   if (!path) return null;

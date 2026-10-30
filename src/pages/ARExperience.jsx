@@ -1,40 +1,69 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import ARSplash from '../components/ar/ARSplash.jsx';
 import ARHud from '../components/ar/ARHud.jsx';
 import ARMessage from '../components/ar/ARMessage.jsx';
 import { useExperiencePreload } from '../hooks/useExperiencePreload.js';
 import { useWebAR } from '../hooks/useWebAR.js';
 import { detectARSupportIssue } from '../ar/environment.js';
-import { getPublicExperience } from '../services/experienceService.js';
+import { getPublicExperience, listPublicExperiences } from '../services/experienceService.js';
 import styles from '../components/ar/AR.module.css';
 
-/** Public page opened from the QR code: /ar/:id */
-export default function ARExperience() {
+/** Header and splash copy for the gallery link (one QR code for many artworks). */
+function galleryInfo(experiences) {
+  const first = experiences[0];
+  return {
+    id: 'gallery',
+    name: 'AR Gallery',
+    description: `Point your camera at any of the ${experiences.length} artworks. Each one comes to life on its own.`,
+    brand: { name: 'AR Gallery', accentColor: first?.brand?.accentColor || '#1f6fff', logoUrl: null, coverUrl: first?.brand?.coverUrl ?? null },
+    target: first?.target,
+    hotspots: [],
+    content: {},
+  };
+}
+
+/**
+ * Public AR page opened from a QR code.
+ *   /ar/:id    one experience
+ *   /gallery   every published artwork in one session (?ids=a,b,c picks and orders them):
+ *              whichever artwork is in view shows its own content.
+ */
+export default function ARExperience({ gallery = false }) {
   const { id } = useParams();
-  const [load, setLoad] = useState({ loading: true, error: null, experience: null });
+  const [params] = useSearchParams();
+  const idsParam = params.get('ids') || '';
+  const [load, setLoad] = useState({ loading: true, error: null, experiences: null });
   const [attempt, setAttempt] = useState(0);
   const containerRef = useRef(null);
 
   useEffect(() => {
     const controller = new AbortController();
-    setLoad({ loading: true, error: null, experience: null });
-    getPublicExperience(id, { signal: controller.signal })
-      .then((experience) => setLoad({ loading: false, error: null, experience }))
+    const opts = { signal: controller.signal };
+    setLoad({ loading: true, error: null, experiences: null });
+    const ids = idsParam.split(',').map((x) => x.trim()).filter(Boolean);
+    (gallery ? listPublicExperiences({ ...opts, ids }) : getPublicExperience(id, opts).then((e) => [e]))
+      .then((experiences) => {
+        if (!experiences.length) throw Object.assign(new Error('No published artworks.'), { status: 404 });
+        setLoad({ loading: false, error: null, experiences });
+      })
       .catch((error) => {
-        if (error.name !== 'AbortError') setLoad({ loading: false, error, experience: null });
+        if (error.name !== 'AbortError') setLoad({ loading: false, error, experiences: null });
       });
     return () => controller.abort();
-  }, [id, attempt]);
+  }, [id, gallery, idsParam, attempt]);
 
-  const experience = load.experience;
-  const preload = useExperiencePreload(experience);
-  const ar = useWebAR({ containerRef, experience, assets: preload.assets });
+  const experiences = load.experiences;
+  const info = useMemo(() => (experiences ? (gallery ? galleryInfo(experiences) : experiences[0]) : null), [experiences, gallery]);
+  const preload = useExperiencePreload(experiences);
+  const ar = useWebAR({ containerRef, experiences, assets: preload.assets });
   const supportIssue = useMemo(() => detectARSupportIssue(), []);
+  // In a gallery, the HUD follows the artwork in view once one was found.
+  const hudExperience = gallery && ar.status !== 'scanning' && ar.status !== 'starting' ? ar.activeExperience : info;
 
   useEffect(() => {
-    document.title = experience ? `${experience.name} · AR` : 'AR Experience';
-  }, [experience]);
+    document.title = info ? `${info.name} · AR` : 'AR Experience';
+  }, [info]);
 
   // Lock page scrolling / zooming gestures while on the AR page.
   useEffect(() => {
@@ -49,7 +78,7 @@ export default function ARExperience() {
   // Called directly from the Start tap so permission prompts count as user-initiated.
   const start = useCallback(() => ar.start(), [ar]);
 
-  const accent = experience?.brand?.accentColor || '#e5173f';
+  const accent = hudExperience?.brand?.accentColor || '#e5173f';
   const inSession = ['starting', 'scanning', 'tracking', 'searching'].includes(ar.status);
 
   let overlay = null;
@@ -68,7 +97,9 @@ export default function ARExperience() {
         title={notFound ? 'Experience not available' : 'Could not load experience'}
         message={
           notFound
-            ? 'This AR experience does not exist or is no longer published.'
+            ? gallery
+              ? 'This gallery has no published artworks.'
+              : 'This AR experience does not exist or is no longer published.'
             : `${load.error.message} Check your connection and try again.`
         }
         onRetry={notFound ? undefined : () => setAttempt((n) => n + 1)}
@@ -84,11 +115,12 @@ export default function ARExperience() {
       />
     );
   } else if (inSession) {
-    overlay = <ARHud experience={experience} ar={ar} onClose={ar.stop} />;
+    overlay = <ARHud experience={hudExperience} ar={ar} onClose={ar.stop} />;
   } else {
     overlay = (
       <ARSplash
-        experience={experience}
+        experience={info}
+        artworks={gallery ? experiences : null}
         progress={preload.progress}
         ready={Boolean(preload.assets)}
         loadError={preload.error}

@@ -194,6 +194,13 @@ api.get('/public/experiences/:id', validId, async (req, res) => {
   res.json(toPublicExperience(exp));
 });
 
+// Public: the gallery (one QR code that recognises every published artwork).
+api.get('/public/experiences', async (req, res) => {
+  const list = (await store.list()).filter((e) => e.status === 'published');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.json(list.map(toPublicExperience));
+});
+
 api.get('/experiences', requireAdmin, async (req, res) => {
   res.json(await store.list());
 });

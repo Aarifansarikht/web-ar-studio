@@ -1,0 +1,73 @@
+{
+  "id": "ac9tcc25am",
+  "name": "Haeckel’s Jellyfish — Living Plate",
+  "description": "Point your camera at Ernst Haeckel’s jellyfish plate and watch it come alive: the bells pulse, the tentacles drift and plankton floats past. Plate: Ernst Haeckel, Kunstformen der Natur (1904), “Discomedusae” — public domain (Wikimedia Commons). Animation made from the plate itself.",
+  "status": "published",
+  "brand": {
+    "name": "Bay81 Gallery",
+    "accentColor": "#1fa3c8",
+    "logoUrl": null,
+    "coverUrl": null
+  },
+  "content": {
+    "type": "video",
+    "url": "/uploads/ac9tcc25am/content-5dc03cbad6.mp4",
+    "fileName": "haeckel-jellyfish-living.mp4",
+    "fit": "target",
+    "loop": true,
+    "startMuted": true,
+    "playAnimations": true,
+    "alignToTarget": false,
+    "depth": 1,
+    "aspect": 1
+  },
+  "placement": {
+    "scale": 1,
+    "offsetX": 0,
+    "offsetY": 0,
+    "offsetZ": 0,
+    "rotationX": 0,
+    "rotationY": 0,
+    "rotationZ": 0
+  },
+  "hotspots": [
+    {
+      "id": "desmonema",
+      "label": "Desmonema annasethe",
+      "x": 0.74,
+      "y": 0.13,
+      "z": 0
+    },
+    {
+      "id": "tentacles",
+      "label": "Trailing tentacles",
+      "x": 0.16,
+      "y": 0.55,
+      "z": 0
+    },
+    {
+      "id": "golden",
+      "label": "Golden bell",
+      "x": 0.83,
+      "y": 0.45,
+      "z": 0
+    },
+    {
+      "id": "below",
+      "label": "Seen from below",
+      "x": 0.4,
+      "y": 0.69,
+      "z": 0
+    }
+  ],
+  "target": {
+    "imageUrl": "/uploads/ac9tcc25am/target-68951b5837.jpg",
+    "mindUrl": "/uploads/ac9tcc25am/target-90ebeba75d.mind",
+    "width": 1428,
+    "height": 2048,
+    "quality": "good",
+    "featureCount": 5567
+  },
+  "createdAt": "2026-10-30T07:26:49.510Z",
+  "updatedAt": "2026-10-30T07:26:49.510Z"
+}

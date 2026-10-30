@@ -51,6 +51,14 @@ export default function App() {
           </Suspense>
         }
       />
+      <Route
+        path="/gallery"
+        element={
+          <Suspense fallback={<div style={{ position: 'fixed', inset: 0, background: '#07080b' }} />}>
+            <ARExperience gallery />
+          </Suspense>
+        }
+      />
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

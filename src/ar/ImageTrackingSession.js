@@ -84,6 +84,8 @@ const TUNING = (() => {
  *   - origin at the centre of the target image
  *   - +X right, +Y up, +Z out of the image towards the viewer
  *   - 1 unit = the target image's width (height = targetHeight / targetWidth)
+ * The compiled data may contain several images (gallery): one is tracked at a
+ * time; `displayTarget` is the index of the image whose pose is on screen.
  *
  * Smooth and glued: every camera frame is copied to the GPU as it arrives
  * (requestVideoFrameCallback) and the view plays the frames back at full camera
@@ -98,7 +100,7 @@ export class ImageTrackingSession {
    * @param {object} opts
    * @param {HTMLElement} opts.container Full-size element that will host the video and canvas.
    * @param {ArrayBuffer} opts.mindBuffer Compiled `.mind` target data.
-   * @param {(e: {type: 'found'|'searching'}) => void} [opts.onTrackingChange]
+   * @param {(e: {type: 'found'|'searching', targetIndex: number}) => void} [opts.onTrackingChange]
    * @param {(e: {fullscreen: boolean}) => void} [opts.onModeChange]
    * @param {(dt: number, elapsed: number) => void} [opts.onFrame]
    */
@@ -121,9 +123,10 @@ export class ImageTrackingSession {
     this.everFound = false;
     this.fullscreen = false;
     this.stopped = false;
-    this.targetAspect = 1;
-    this.targetWidth = 1;
-    this._postMatrix = new THREE.Matrix4();
+    /** Per image: { aspect, width, post } (post: MindAR pose units → 1 unit = image width, centred). */
+    this.targets = [];
+    this.activeTarget = -1; // image the tracker currently follows
+    this.displayTarget = -1; // image whose pose belongs to the frame on screen
     this._processDone = null;
 
     // Pose state (allocated once).
@@ -201,6 +204,15 @@ export class ImageTrackingSession {
   /** True while the image is actually being tracked by the camera. */
   get isTracking() {
     return this.tracking;
+  }
+
+  /** Height / width of the image on screen (or the first image). */
+  get targetAspect() {
+    return this.targets[Math.max(0, this.displayTarget)]?.aspect ?? 1;
+  }
+
+  get targetWidth() {
+    return this.targets[Math.max(0, this.displayTarget)]?.width ?? 1;
   }
 
   /** True once the target has been recognised at least once. */
@@ -474,12 +486,13 @@ export class ImageTrackingSession {
         });
     }
     this.#setupAdaptiveTracking(dimensions, trackingDataList);
-    const [w, h] = dimensions[0];
-    this.targetAspect = h / w;
-    this.targetWidth = w;
     // MindAR reports poses in target-pixel units with the origin at the
     // bottom-left corner; re-centre and normalise so 1 unit = target width.
-    this._postMatrix.compose(new THREE.Vector3(w / 2, h / 2, 0), new THREE.Quaternion(), new THREE.Vector3(w, w, w));
+    this.targets = dimensions.map(([w, h]) => ({
+      aspect: h / w,
+      width: w,
+      post: new THREE.Matrix4().compose(new THREE.Vector3(w / 2, h / 2, 0), new THREE.Quaternion(), new THREE.Vector3(w, w, w)),
+    }));
 
     this.resize();
     // Compile GPU kernels before the first real frame (can take ~1s).
@@ -514,7 +527,7 @@ export class ImageTrackingSession {
     }
     const coarse = c.tracker;
     const fine = this._fineTracker;
-    const minSide = Math.min(dimensions[0][0], dimensions[0][1]);
+    const minSides = dimensions.map(([w, h]) => Math.min(w, h));
     const focal = c.projectionTransform[0][0];
     let level = 1;
     const trackAndUpdate = c._trackAndUpdate.bind(c);
@@ -523,7 +536,7 @@ export class ImageTrackingSession {
     c._trackAndUpdate = async (input, modelView, index) => {
       if (fine) {
         const depth = modelView[2][3];
-        const apparent = depth > 0 ? (focal * minSide) / depth : 0;
+        const apparent = depth > 0 ? (focal * minSides[index]) / depth : 0;
         if (level === 1 && apparent > FINE_ENTER_PX) level = 0;
         else if (level === 0 && apparent < FINE_EXIT_PX) level = 1;
         c.tracker = level === 0 ? fine : coarse;
@@ -544,12 +557,16 @@ export class ImageTrackingSession {
     }
     if (data.type !== 'updateMatrix' || this.stopped) return;
 
-    const { worldMatrix } = data;
+    const { worldMatrix, targetIndex = 0 } = data;
     if (worldMatrix) {
+      // Another image was recognised while the previous one is still within
+      // its miss tolerance: start a new lock on the new image.
+      if (this.tracking && targetIndex !== this.activeTarget) this.tracking = false;
       // Missed frame (MindAR re-reports the previous pose): keep predicting
       // from the last real measurement instead of treating it as "stopped".
       if (this.tracking && !this._frameTracked) return;
-      this._trackedMatrix.fromArray(worldMatrix).multiply(this._postMatrix);
+      if (!this.tracking) this.activeTarget = targetIndex;
+      this._trackedMatrix.fromArray(worldMatrix).multiply(this.targets[targetIndex].post);
       this._trackedMatrix.decompose(this._rawP, this._rawQ, this._rawS);
       if (TUNING.noise) this.#addTestNoise(TUNING.noise);
       if (!this.tracking) {
@@ -563,12 +580,12 @@ export class ImageTrackingSession {
         this.tracking = true;
         this._snapPose = true;
         this.everFound = true;
-        this.onTrackingChange?.({ type: 'found' });
+        this.onTrackingChange?.({ type: 'found', targetIndex });
       }
-    } else if (this.tracking) {
+    } else if (this.tracking && targetIndex === this.activeTarget) {
       // Lost: hide immediately. Content only ever appears where the image is.
       this.tracking = false;
-      this.onTrackingChange?.({ type: 'searching' });
+      this.onTrackingChange?.({ type: 'searching', targetIndex });
     }
   }
 
@@ -665,6 +682,7 @@ export class ImageTrackingSession {
           };
     entry.t = t;
     entry.seg = this._seg;
+    entry.target = this.activeTarget;
     entry.p.copy(this._predP); // causally stabilised (live fallback, A/B)
     entry.q.copy(this._predQ);
     entry.s.copy(this._predS);
@@ -693,6 +711,7 @@ export class ImageTrackingSession {
       }
     }
     if (!ref) return false;
+    this.displayTarget = ref.target;
     F.qInv.copy(ref.rq).invert();
     const { smoothstep, lerp, degToRad } = THREE.MathUtils;
     let sigma = FIT_SIGMA_MOVE;
@@ -778,6 +797,7 @@ export class ImageTrackingSession {
     if (t >= last.t) {
       if (last.seg !== this._seg || (!this.tracking && t > last.t + 0.002)) return false;
       if (fit) return this.#fitPose(Math.min(t, last.t + MAX_PREDICT_S), last.seg, out);
+      this.displayTarget = last.target;
       const h = TUNING.predict === false ? 0 : Math.min(MAX_PREDICT_S, t - last.t);
       this._gp.copy(last.p).addScaledVector(this._vel, h);
       this._gq.copy(last.q);
@@ -795,6 +815,7 @@ export class ImageTrackingSession {
     const b = P[i + 1];
     if (a.seg !== b.seg) return false; // image was lost between these frames
     if (fit) return this.#fitPose(t, a.seg, out);
+    this.displayTarget = a.target;
     const f = b.t > a.t ? THREE.MathUtils.clamp((t - a.t) / (b.t - a.t), 0, 1) : 1;
     this._gp.lerpVectors(a.p, b.p, f);
     this._gq.slerpQuaternions(a.q, b.q, f);
@@ -904,7 +925,7 @@ export class ImageTrackingSession {
     this._snapT = 0;
     if (this.tracking) {
       this.tracking = false;
-      this.onTrackingChange?.({ type: 'searching' });
+      this.onTrackingChange?.({ type: 'searching', targetIndex: this.activeTarget });
     }
     await this.#buildController();
   }
@@ -977,6 +998,7 @@ export class ImageTrackingSession {
       this.bgMesh.material.uniforms.map.value = frame.rt.texture;
     }
     this.stats.delayMs = frame ? Math.round((now - frame.t) * 1000) : 0;
+    this.stats.target = this.displayTarget;
     if (frame && frame.t !== this._shownT) {
       this._shownT = frame.t;
       this._viewFrames++;

@@ -6,18 +6,21 @@ import { copyText, downloadQrPng } from '../../services/qrService.js';
 import { URL_KIND_TONE, buildExperienceUrl, classifyUrl } from '../../utils/url.js';
 import styles from './QRPanel.module.css';
 
-/** QR code + share actions for one experience's public AR URL. */
-export default function QRPanel({ experience }) {
+/**
+ * QR code + share actions for one experience's public AR URL, or for any
+ * other public link (`url` + `name`, e.g. the gallery).
+ */
+export default function QRPanel({ experience, url: customUrl, name, title = 'QR code' }) {
   const toast = useToast();
   const exportRef = useRef(null);
-  const url = buildExperienceUrl(experience.id);
+  const url = customUrl ?? buildExperienceUrl(experience.id);
   const urlInfo = classifyUrl(url);
-  const isDraft = experience.status !== 'published';
+  const isDraft = experience ? experience.status !== 'published' : false;
 
   const onCopy = async () => {
     try {
       await copyText(url);
-      toast.success('Experience link copied');
+      toast.success('Link copied');
     } catch {
       toast.error('Could not copy the link — select it manually.');
     }
@@ -25,17 +28,17 @@ export default function QRPanel({ experience }) {
 
   const onDownload = () => {
     try {
-      downloadQrPng(exportRef.current, experience.name);
+      downloadQrPng(exportRef.current, name ?? experience.name);
     } catch (err) {
       toast.error(err.message);
     }
   };
 
   return (
-    <section className={`card ${styles.panel}`} aria-labelledby="qr-title">
+    <section className={`card ${styles.panel}`} aria-label={title}>
       <header className={styles.head}>
-        <h2 id="qr-title">
-          <Icon name="qr" size={18} /> QR code
+        <h2>
+          <Icon name="qr" size={18} /> {title}
         </h2>
         <span className={`badge badge-${URL_KIND_TONE[urlInfo.kind]}`}>{urlInfo.label}</span>
       </header>

@@ -8,7 +8,7 @@ import styles from './AR.module.css';
  * "Preloading" bar while assets download, then the Start AR button.
  * The camera is NOT requested here.
  */
-export default function ARSplash({ experience, progress, ready, loadError, onRetry, supportIssue, onStart }) {
+export default function ARSplash({ experience, artworks, progress, ready, loadError, onRetry, supportIssue, onStart }) {
   const pct = Math.round(progress * 100);
 
   return (
@@ -29,6 +29,15 @@ export default function ARSplash({ experience, progress, ready, loadError, onRet
         <div className={styles.splashCopy}>
           <h1>{experience.name}</h1>
           {experience.description && <p>{experience.description}</p>}
+          {artworks?.length > 1 && (
+            <ul className={styles.artworkStrip} aria-label="Artworks in this gallery">
+              {artworks.map((a) => (
+                <li key={a.id}>
+                  <img src={assetUrl(a.target.imageUrl)} alt={a.name} loading="lazy" />
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
 
         {loadError ? (
