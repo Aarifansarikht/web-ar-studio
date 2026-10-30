@@ -1,5 +1,49 @@
 [
   {
+    "id": "p9a2xpex58",
+    "name": "Volleyball Cover — Live Test",
+    "description": "Test experience for a printed notebook cover: point your camera at the volleyball cover. The ball spins and glows, red powder streams off the player and the smoke swirls. Target made from a photo of the physical print.",
+    "status": "published",
+    "brand": {
+      "name": "Bay81 Gallery",
+      "accentColor": "#e03a3e",
+      "logoUrl": null,
+      "coverUrl": null
+    },
+    "content": {
+      "type": "video",
+      "url": "/uploads/p9a2xpex58/content-013d5574c7.mp4",
+      "fileName": "saathi-volleyball-living.mp4",
+      "fit": "target",
+      "loop": true,
+      "startMuted": true,
+      "playAnimations": true,
+      "alignToTarget": false,
+      "depth": 1,
+      "aspect": 1
+    },
+    "placement": {
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "offsetZ": 0,
+      "rotationX": 0,
+      "rotationY": 0,
+      "rotationZ": 0
+    },
+    "hotspots": [],
+    "target": {
+      "imageUrl": "/uploads/p9a2xpex58/target-59c230cc48.jpg",
+      "mindUrl": "/uploads/p9a2xpex58/target-435fe22a2c.mind",
+      "width": 1480,
+      "height": 2000,
+      "quality": "good",
+      "featureCount": 3510
+    },
+    "createdAt": "2026-10-30T10:36:00.944Z",
+    "updatedAt": "2026-10-30T10:36:00.944Z"
+  },
+  {
     "id": "fjyd6wyh65",
     "name": "The Starry Night — Living Painting",
     "description": "Point your camera at Van Gogh’s The Starry Night and watch the sky swirl to life. Tap the dots to explore. Painting: Vincent van Gogh, 1889 — public domain (Wikimedia Commons).",

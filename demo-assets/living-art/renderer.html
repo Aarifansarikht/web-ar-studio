@@ -221,6 +221,75 @@ void main(){
   c += vec3(1.0, 0.9, 0.7) * exp(-pow((uv.x - (s * 1.6 - 0.3)) * 3.0, 2.0)) * 0.08;
   gl_FragColor = pinEdges(c);
 }` },
+
+  // Volleyball poster (photo of a printed notebook cover): the smoke streams
+  // and swirls, red powder flies off behind the player, the ball spins and
+  // glows with a shockwave, stadium light sweeps across, the net shimmers.
+  volley: { width: 740, height: 1000, fs: `
+vec3 flowSample(vec2 q, vec2 dir, float amp){
+  // Two-phase flow-map advection: continuous streaming without stretching.
+  float p1 = fract(ph / (2.0 * PI) * 2.0);
+  float p2 = fract(p1 + 0.5);
+  float w = abs(1.0 - 2.0 * p1);
+  vec3 a = texture2D(art, q - dir * p1 * amp).rgb;
+  vec3 b = texture2D(art, q - dir * p2 * amp).rgb;
+  return mix(a, b, 1.0 - w);
+}
+void main(){
+  float aspect = res.x / res.y;
+  vec2 q = uv;
+  vec3 base = texture2D(art, uv).rgb;
+  // Ball: spin its pixels around the centre, 2 turns per loop.
+  vec2 ballC = vec2(0.158, 0.133);
+  float ballR = 0.05;
+  vec2 bd = (uv - ballC) * vec2(aspect, 1.0);
+  float br = length(bd) / (ballR * aspect);
+  if (br < 1.0) {
+    vec2 rd = rot(bd, -ph * 2.0 * (1.0 - br * 0.15));
+    q = ballC + rd / vec2(aspect, 1.0);
+  }
+  // Smoke: red powder streams to the right behind the player, white smoke swirls.
+  float red = smoothstep(0.12, 0.3, base.r - base.g) * smoothstep(0.5, 0.62, uv.x) * smoothstep(0.18, 0.28, uv.y) * smoothstep(0.85, 0.72, uv.y);
+  float white = smoothstep(0.55, 0.75, lum(base)) * (1.0 - smoothstep(0.15, 0.3, sat(base))) * smoothstep(0.08, 0.2, uv.y) * smoothstep(0.88, 0.75, uv.y);
+  vec2 swirl = vec2(sin(uv.y * 9.0 + ph + sin(uv.x * 5.0 - ph)), cos(uv.x * 8.0 - ph * 2.0 + uv.y * 3.0)) * 0.012;
+  q += swirl * white * edgeLock();
+  q = lockUv(q);
+  vec3 c = texture2D(art, q).rgb;
+  vec3 streamed = flowSample(lockUv(uv), vec2(-1.0, 0.12), 0.06);
+  c = mix(c, streamed * vec3(1.08, 0.98, 0.98), red * edgeLock());
+  // Ball glow and a shockwave ring once per loop.
+  float bl = length((uv - ballC) * vec2(aspect, 1.0)) / (ballR * aspect);
+  float beat = 0.5 + 0.5 * sin(ph * 2.0);
+  c += vec3(0.75, 0.9, 1.0) * exp(-pow(max(bl - 1.0, 0.0) * 2.2, 2.0)) * (0.25 + 0.35 * beat) * step(1.0, bl);
+  float wave = fract(ph / (2.0 * PI));
+  c += vec3(0.9, 0.95, 1.0) * exp(-pow((bl - 1.0 - wave * 7.0) * 2.5, 2.0)) * (1.0 - wave) * 0.55;
+  // Red powder particles flying off to the right.
+  for (int layer = 0; layer < 2; layer++) {
+    float n = layer == 0 ? 30.0 : 16.0;
+    float k = layer == 0 ? 3.0 : 2.0;
+    vec2 g = vec2(uv.x * n * aspect - ph / (2.0 * PI) * n * k, uv.y * n + sin(uv.x * 9.0 + ph * 2.0) * 0.6);
+    vec2 cell = floor(g);
+    vec2 f = fract(g) - 0.5;
+    float h = hash(cell + float(layer) * 7.0);
+    float region = smoothstep(0.48, 0.6, uv.x) * smoothstep(0.2, 0.3, uv.y) * smoothstep(0.82, 0.7, uv.y);
+    if (h > 0.62) {
+      vec2 o = vec2(hash(cell + 2.3) - 0.5, hash(cell + 8.1) - 0.5) * 0.5;
+      float d = length((f - o) * vec2(0.6, 1.0));
+      float sz = layer == 0 ? 0.13 : 0.2;
+      float p = smoothstep(sz, sz * 0.3, d);
+      vec3 pc = mix(vec3(0.95, 0.15, 0.12), vec3(1.0, 0.55, 0.35), hash(cell + 4.4));
+      c = mix(c, pc, p * region * 0.9);
+      c += pc * exp(-d * d * 40.0) * 0.25 * region;
+    }
+  }
+  // Net shimmer: a bright wave travelling along the white net lines.
+  float net = smoothstep(0.62, 0.8, lum(base)) * smoothstep(0.42, 0.3, uv.x) * smoothstep(0.32, 0.36, uv.y) * smoothstep(0.66, 0.6, uv.y);
+  c += vec3(0.8, 0.9, 1.0) * net * pow(0.5 + 0.5 * sin(uv.x * 30.0 - ph * 4.0), 4.0) * 0.45;
+  // Stadium light sweep, twice per loop.
+  float sweep = exp(-pow((uv.x * 0.7 - uv.y * 0.7 + 1.0 - fract(ph / PI) * 2.2) * 5.0, 2.0));
+  c += vec3(1.0, 0.95, 0.85) * sweep * 0.22;
+  gl_FragColor = pinEdges(c);
+}` },
 };
 
 const canvas = document.getElementById('c');
