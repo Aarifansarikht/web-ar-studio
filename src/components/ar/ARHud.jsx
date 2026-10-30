@@ -52,6 +52,8 @@ export default function ARHud({ experience, ar, onClose }) {
           tracker {ar.stats.trackFps} fps · {ar.stats.tracking ? 'locked' : 'searching'} · view {ar.stats.viewFps ?? '–'} fps, delay {ar.stats.delayMs} ms
           <br />
           wobble {ar.stats.wobbleRaw}px → {ar.stats.wobbleShown}px · jerk {ar.stats.jerk ?? 0}px · {ar.stats.trackLevel} · art {ar.stats.target} · gyro {ar.stats.gyro} · match {ar.stats.quality} · fov {ar.stats.fov}°{ar.stats.fovMeasured ? ` (measured ${ar.stats.fovMeasured}°)` : ' (measuring)'}
+          <br />
+          {ar.status === 'tracking' ? 'TRACKING' : ar.status === 'searching' ? 'LOST' : 'DETECTING'} · {ar.stats.anchor} · {ar.stats.events}
         </div>
       )}
 

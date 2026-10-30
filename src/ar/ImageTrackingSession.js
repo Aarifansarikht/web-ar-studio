@@ -89,7 +89,15 @@ const TUNING = (() => {
     // &fit=0: interpolate the causally stabilised poses instead (A/B).
     fit: q.get('fit') !== '0',
     minTrack: num('minTrack'),
+    fitMean: q.get('fitMean') !== '0',
+    sigS: num('sigS'),
+    sigM: num('sigM'),
     drift: q.get('drift') === '1',
+    // &wire=1: wireframe of the exact target rectangle on the tracked anchor.
+    wire: q.get('wire') === '1',
+    staleHide: q.get('staleHide') !== '0',
+    // &stall=1: pause the tracker 0.6 s every 3 s (simulates a busy phone).
+    stall: q.get('stall') === '1',
     // &gyro=1: gyroscope fusion (experimental, off by default: on a real phone the
     // camera/gyroscope timing differs per device and it pulled content off the image).
     gyro: q.get('gyro') === '1',
@@ -589,6 +597,10 @@ export class ImageTrackingSession {
       // Require a share of the points that should be visible to match; else
       // drop the lock so the image is re-detected at its true position.
       if (TUNING.drift) this.#debugKick(modelView);
+      if (TUNING.stall && performance.now() - (this._stallAt ??= performance.now()) > 3000) {
+        this._stallAt = performance.now();
+        await new Promise((r) => setTimeout(r, 600));
+      }
       const { worldCoords, screenCoords } = c.tracker.track(input, modelView, index);
       this.#calibrateFocal(worldCoords, screenCoords, index);
       const visible = this.#visibleTrackPoints(c, modelView, index);
@@ -621,7 +633,10 @@ export class ImageTrackingSession {
     const c = this.controller;
     const current = c.projectionTransform[0][0];
     this.stats.fovMeasured = measured ? Math.round(cal.fovFor(measured)) : null;
-    if (!measured || Math.abs(measured - current) / current < 0.03) return;
+    // Each switch re-detects the image (a short gap), so only apply clear
+    // differences, at most twice per session.
+    if (!measured || Math.abs(measured - current) / current < 0.05 || (this._focalSwitches ?? 0) >= 2) return;
+    this._focalSwitches = (this._focalSwitches ?? 0) + 1;
     this.#setFocal(measured);
     FocalCalibrator.save(cal.fovFor(measured));
   }
@@ -656,6 +671,15 @@ export class ImageTrackingSession {
     this._seg++;
     this._stabInit = false;
     this.resize();
+  }
+
+  /** Diagnostics: recent tracking state transitions with times (s since start). */
+  #logEvent(e) {
+    if (!TUNING.debug) return;
+    const log = (this._events ??= []);
+    log.push(`${this.clock.elapsedTime.toFixed(1)}s ${e}`);
+    if (log.length > 4) log.shift();
+    this.stats.events = log.join(' → ');
   }
 
   /** Number of the tracker's template points that project inside the camera frame for this pose. */
@@ -732,11 +756,13 @@ export class ImageTrackingSession {
         this.tracking = true;
         this._snapPose = true;
         this.everFound = true;
+        this.#logEvent(`TRACKING art ${targetIndex}`);
         this.onTrackingChange?.({ type: 'found', targetIndex });
       }
     } else if (this.tracking && targetIndex === this.activeTarget) {
       // Lost: hide immediately. Content only ever appears where the image is.
       this.tracking = false;
+      this.#logEvent('LOST');
       this.onTrackingChange?.({ type: 'searching', targetIndex });
     }
   }
@@ -927,7 +953,7 @@ export class ImageTrackingSession {
         const det = S[0] * S[2] - S[1] * S[1];
         if (det > 1e-12 * Math.max(1, S[0] * S[0])) {
           a.copy(y0).multiplyScalar(S[2]).addScaledVector(y1, -S[1]).divideScalar(det);
-          if (pass === 1 && moving < 1) a.lerp(this._fitMean.copy(y0).divideScalar(S[0]), 1 - moving);
+          if (pass === 1 && moving < 1 && TUNING.fitMean !== false) a.lerp(this._fitMean.copy(y0).divideScalar(S[0]), 1 - moving);
           b.copy(y1).multiplyScalar(S[0]).addScaledVector(y0, -S[1]).divideScalar(det);
         } else {
           a.copy(y0).divideScalar(S[0]);
@@ -951,7 +977,7 @@ export class ImageTrackingSession {
           const moving = Math.max(movingP, movingR);
           movingP = moving;
           movingR = moving;
-          sigmaP = lerp(FIT_SIGMA_STILL, FIT_SIGMA_MOVE, moving);
+          sigmaP = lerp(TUNING.sigS ?? FIT_SIGMA_STILL, TUNING.sigM ?? FIT_SIGMA_MOVE, moving);
           sigmaR = sigmaP;
         }
         continue;
@@ -987,6 +1013,10 @@ export class ImageTrackingSession {
     const fit = this._delayed && TUNING.fit !== false;
     if (t >= last.t) {
       if (last.seg !== this._seg || (!this.tracking && t > last.t + 0.002)) return false;
+      // No tracker result for this frame yet (tracker stalled: blur, re-detection,
+      // a busy phone). Showing the last pose would freeze the content while the
+      // camera image moves on (a doubled image): hide it until poses resume.
+      if (t - last.t > MAX_PREDICT_S && TUNING.staleHide !== false) return false;
       if (fit) return this.#fitPose(Math.min(t, last.t + MAX_PREDICT_S), last.seg, out);
       this.displayTarget = last.target;
       const h = TUNING.predict === false ? 0 : Math.min(MAX_PREDICT_S, t - last.t);
@@ -1089,6 +1119,15 @@ export class ImageTrackingSession {
     }
     this.anchor.matrix.compose(this._cp, this._cq, this._cs);
     this.anchor.matrixWorldNeedsUpdate = true;
+    if (TUNING.debug) {
+      this.stats.anchor = `pos ${this._cp.toArray().map((v) => (v / this.targetWidth).toFixed(2)).join(',')} rot ${new THREE.Euler()
+        .setFromQuaternion(this._cq)
+        .toArray()
+        .slice(0, 3)
+        .map((v) => Math.round(THREE.MathUtils.radToDeg(v)))
+        .join(',')}°`;
+      this.#updateWireframe();
+    }
     if (TUNING.debug && exact) {
       this.#recordWobble(this._wobble.shown, this.anchor.matrix);
       if (frameT !== this._jerkT) {
@@ -1097,6 +1136,23 @@ export class ImageTrackingSession {
       }
     }
     this.anchor.visible = true;
+  }
+
+  /** Debug wireframe (?debug&wire=1): exact target rectangle + diagonals, on the anchor. */
+  #updateWireframe() {
+    if (!TUNING.wire) return;
+    if (!this._wire) {
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(new Array(30).fill(0), 3));
+      this._wire = new THREE.LineSegments(g, new THREE.LineBasicMaterial({ color: 0x00ff66, depthTest: false, transparent: true }));
+      this._wire.renderOrder = 999;
+      this.anchor.add(this._wire);
+    }
+    const h = this.targetAspect / 2;
+    const P = [[-0.5, h], [0.5, h], [0.5, h], [0.5, -h], [0.5, -h], [-0.5, -h], [-0.5, -h], [-0.5, h], [-0.5, h], [0.5, -h]];
+    const pos = this._wire.geometry.attributes.position;
+    P.forEach(([x, y], i) => pos.setXYZ(i, x, y, 0.001));
+    pos.needsUpdate = true;
   }
 
   #onVideoResize = null;
