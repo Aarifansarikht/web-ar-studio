@@ -1,0 +1,66 @@
+{
+  "id": "b2mvhfw7mq",
+  "name": "Almond Blossoms — Spring Breeze",
+  "description": "Point your camera at Van Gogh’s Almond Blossoms: the branches sway, the sky flows and petals drift across the canvas. Painting: Vincent van Gogh, 1890 — public domain (Wikimedia Commons). Animation made from the painting itself.",
+  "status": "published",
+  "brand": {
+    "name": "Bay81 Gallery",
+    "accentColor": "#4fb3bf",
+    "logoUrl": null,
+    "coverUrl": null
+  },
+  "content": {
+    "type": "video",
+    "url": "/uploads/b2mvhfw7mq/content-60c643fef7.mp4",
+    "fileName": "van-gogh-almond-blossoms-living.mp4",
+    "fit": "target",
+    "loop": true,
+    "startMuted": true,
+    "playAnimations": true,
+    "alignToTarget": false,
+    "depth": 1,
+    "aspect": 1
+  },
+  "placement": {
+    "scale": 1,
+    "offsetX": 0,
+    "offsetY": 0,
+    "offsetZ": 0,
+    "rotationX": 0,
+    "rotationY": 0,
+    "rotationZ": 0
+  },
+  "hotspots": [
+    {
+      "id": "blossom",
+      "label": "Almond blossom",
+      "x": 0.55,
+      "y": 0.18,
+      "z": 0
+    },
+    {
+      "id": "branch",
+      "label": "Twisting branch",
+      "x": 0.62,
+      "y": 0.86,
+      "z": 0
+    },
+    {
+      "id": "sky",
+      "label": "Turquoise sky",
+      "x": 0.12,
+      "y": 0.4,
+      "z": 0
+    }
+  ],
+  "target": {
+    "imageUrl": "/uploads/b2mvhfw7mq/target-a0ff567fa2.jpg",
+    "mindUrl": "/uploads/b2mvhfw7mq/target-2c7839e342.mind",
+    "width": 2048,
+    "height": 1618,
+    "quality": "good",
+    "featureCount": 5154
+  },
+  "createdAt": "2026-10-30T08:04:10.719Z",
+  "updatedAt": "2026-10-30T08:04:10.719Z"
+}

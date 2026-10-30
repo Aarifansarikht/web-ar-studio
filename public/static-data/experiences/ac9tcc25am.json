@@ -1,7 +1,7 @@
 {
   "id": "ac9tcc25am",
   "name": "Haeckel’s Jellyfish — Living Plate",
-  "description": "Point your camera at Ernst Haeckel’s jellyfish plate and watch it come alive: the bells pulse, the tentacles drift and plankton floats past. Plate: Ernst Haeckel, Kunstformen der Natur (1904), “Discomedusae” — public domain (Wikimedia Commons). Animation made from the plate itself.",
+  "description": "Point your camera at Ernst Haeckel’s jellyfish plate and dive in: the paper becomes the deep sea, the bells pulse and glow, the tentacles undulate and plankton drifts through rays of light. Plate: Ernst Haeckel, Kunstformen der Natur (1904), “Discomedusae” — public domain (Wikimedia Commons). Animation made from the plate itself.",
   "status": "published",
   "brand": {
     "name": "Bay81 Gallery",
@@ -11,7 +11,7 @@
   },
   "content": {
     "type": "video",
-    "url": "/uploads/ac9tcc25am/content-5dc03cbad6.mp4",
+    "url": "/uploads/ac9tcc25am/content-17fdbfda92.mp4",
     "fileName": "haeckel-jellyfish-living.mp4",
     "fit": "target",
     "loop": true,
@@ -69,5 +69,5 @@
     "featureCount": 5567
   },
   "createdAt": "2026-10-30T07:26:49.510Z",
-  "updatedAt": "2026-10-30T07:26:49.510Z"
+  "updatedAt": "2026-10-30T08:04:11.139Z"
 }

@@ -1,0 +1,73 @@
+{
+  "id": "h3nk4sbenq",
+  "name": "The Kiss — Living Gold",
+  "description": "Point your camera at Klimt’s The Kiss: the gold leaf glitters and shimmers, golden dust rises and the flower meadow sways. Painting: Gustav Klimt, 1907–1908 — public domain (Wikimedia Commons). Animation made from the painting itself.",
+  "status": "published",
+  "brand": {
+    "name": "Bay81 Gallery",
+    "accentColor": "#d4a017",
+    "logoUrl": null,
+    "coverUrl": null
+  },
+  "content": {
+    "type": "video",
+    "url": "/uploads/h3nk4sbenq/content-d4e6d86ecb.mp4",
+    "fileName": "klimt-the-kiss-living.mp4",
+    "fit": "target",
+    "loop": true,
+    "startMuted": true,
+    "playAnimations": true,
+    "alignToTarget": false,
+    "depth": 1,
+    "aspect": 1
+  },
+  "placement": {
+    "scale": 1,
+    "offsetX": 0,
+    "offsetY": 0,
+    "offsetZ": 0,
+    "rotationX": 0,
+    "rotationY": 0,
+    "rotationZ": 0
+  },
+  "hotspots": [
+    {
+      "id": "lovers",
+      "label": "The embrace",
+      "x": 0.42,
+      "y": 0.12,
+      "z": 0
+    },
+    {
+      "id": "gold",
+      "label": "Real gold leaf",
+      "x": 0.82,
+      "y": 0.3,
+      "z": 0
+    },
+    {
+      "id": "meadow",
+      "label": "Flower meadow",
+      "x": 0.2,
+      "y": 0.88,
+      "z": 0
+    },
+    {
+      "id": "robe",
+      "label": "Patterned robe",
+      "x": 0.32,
+      "y": 0.45,
+      "z": 0
+    }
+  ],
+  "target": {
+    "imageUrl": "/uploads/h3nk4sbenq/target-72c4921856.jpg",
+    "mindUrl": "/uploads/h3nk4sbenq/target-e32f94c4b5.mind",
+    "width": 2042,
+    "height": 2048,
+    "quality": "good",
+    "featureCount": 5179
+  },
+  "createdAt": "2026-10-30T08:04:04.835Z",
+  "updatedAt": "2026-10-30T08:04:04.835Z"
+}

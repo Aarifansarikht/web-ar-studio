@@ -2,7 +2,7 @@
   {
     "id": "ac9tcc25am",
     "name": "Haeckel’s Jellyfish — Living Plate",
-    "description": "Point your camera at Ernst Haeckel’s jellyfish plate and watch it come alive: the bells pulse, the tentacles drift and plankton floats past. Plate: Ernst Haeckel, Kunstformen der Natur (1904), “Discomedusae” — public domain (Wikimedia Commons). Animation made from the plate itself.",
+    "description": "Point your camera at Ernst Haeckel’s jellyfish plate and dive in: the paper becomes the deep sea, the bells pulse and glow, the tentacles undulate and plankton drifts through rays of light. Plate: Ernst Haeckel, Kunstformen der Natur (1904), “Discomedusae” — public domain (Wikimedia Commons). Animation made from the plate itself.",
     "status": "published",
     "brand": {
       "name": "Bay81 Gallery",
@@ -12,7 +12,7 @@
     },
     "content": {
       "type": "video",
-      "url": "/uploads/ac9tcc25am/content-5dc03cbad6.mp4",
+      "url": "/uploads/ac9tcc25am/content-17fdbfda92.mp4",
       "fileName": "haeckel-jellyfish-living.mp4",
       "fit": "target",
       "loop": true,
@@ -70,7 +70,146 @@
       "featureCount": 5567
     },
     "createdAt": "2026-10-30T07:26:49.510Z",
-    "updatedAt": "2026-10-30T07:26:49.510Z"
+    "updatedAt": "2026-10-30T08:04:11.139Z"
+  },
+  {
+    "id": "b2mvhfw7mq",
+    "name": "Almond Blossoms — Spring Breeze",
+    "description": "Point your camera at Van Gogh’s Almond Blossoms: the branches sway, the sky flows and petals drift across the canvas. Painting: Vincent van Gogh, 1890 — public domain (Wikimedia Commons). Animation made from the painting itself.",
+    "status": "published",
+    "brand": {
+      "name": "Bay81 Gallery",
+      "accentColor": "#4fb3bf",
+      "logoUrl": null,
+      "coverUrl": null
+    },
+    "content": {
+      "type": "video",
+      "url": "/uploads/b2mvhfw7mq/content-60c643fef7.mp4",
+      "fileName": "van-gogh-almond-blossoms-living.mp4",
+      "fit": "target",
+      "loop": true,
+      "startMuted": true,
+      "playAnimations": true,
+      "alignToTarget": false,
+      "depth": 1,
+      "aspect": 1
+    },
+    "placement": {
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "offsetZ": 0,
+      "rotationX": 0,
+      "rotationY": 0,
+      "rotationZ": 0
+    },
+    "hotspots": [
+      {
+        "id": "blossom",
+        "label": "Almond blossom",
+        "x": 0.55,
+        "y": 0.18,
+        "z": 0
+      },
+      {
+        "id": "branch",
+        "label": "Twisting branch",
+        "x": 0.62,
+        "y": 0.86,
+        "z": 0
+      },
+      {
+        "id": "sky",
+        "label": "Turquoise sky",
+        "x": 0.12,
+        "y": 0.4,
+        "z": 0
+      }
+    ],
+    "target": {
+      "imageUrl": "/uploads/b2mvhfw7mq/target-a0ff567fa2.jpg",
+      "mindUrl": "/uploads/b2mvhfw7mq/target-2c7839e342.mind",
+      "width": 2048,
+      "height": 1618,
+      "quality": "good",
+      "featureCount": 5154
+    },
+    "createdAt": "2026-10-30T08:04:10.719Z",
+    "updatedAt": "2026-10-30T08:04:10.719Z"
+  },
+  {
+    "id": "h3nk4sbenq",
+    "name": "The Kiss — Living Gold",
+    "description": "Point your camera at Klimt’s The Kiss: the gold leaf glitters and shimmers, golden dust rises and the flower meadow sways. Painting: Gustav Klimt, 1907–1908 — public domain (Wikimedia Commons). Animation made from the painting itself.",
+    "status": "published",
+    "brand": {
+      "name": "Bay81 Gallery",
+      "accentColor": "#d4a017",
+      "logoUrl": null,
+      "coverUrl": null
+    },
+    "content": {
+      "type": "video",
+      "url": "/uploads/h3nk4sbenq/content-d4e6d86ecb.mp4",
+      "fileName": "klimt-the-kiss-living.mp4",
+      "fit": "target",
+      "loop": true,
+      "startMuted": true,
+      "playAnimations": true,
+      "alignToTarget": false,
+      "depth": 1,
+      "aspect": 1
+    },
+    "placement": {
+      "scale": 1,
+      "offsetX": 0,
+      "offsetY": 0,
+      "offsetZ": 0,
+      "rotationX": 0,
+      "rotationY": 0,
+      "rotationZ": 0
+    },
+    "hotspots": [
+      {
+        "id": "lovers",
+        "label": "The embrace",
+        "x": 0.42,
+        "y": 0.12,
+        "z": 0
+      },
+      {
+        "id": "gold",
+        "label": "Real gold leaf",
+        "x": 0.82,
+        "y": 0.3,
+        "z": 0
+      },
+      {
+        "id": "meadow",
+        "label": "Flower meadow",
+        "x": 0.2,
+        "y": 0.88,
+        "z": 0
+      },
+      {
+        "id": "robe",
+        "label": "Patterned robe",
+        "x": 0.32,
+        "y": 0.45,
+        "z": 0
+      }
+    ],
+    "target": {
+      "imageUrl": "/uploads/h3nk4sbenq/target-72c4921856.jpg",
+      "mindUrl": "/uploads/h3nk4sbenq/target-e32f94c4b5.mind",
+      "width": 2042,
+      "height": 2048,
+      "quality": "good",
+      "featureCount": 5179
+    },
+    "createdAt": "2026-10-30T08:04:04.835Z",
+    "updatedAt": "2026-10-30T08:04:04.835Z"
   },
   {
     "id": "vprgcfcwen",

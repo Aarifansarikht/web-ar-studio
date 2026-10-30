@@ -1,0 +1,264 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Living art renderer</title>
+<style>html,body{margin:0;background:#000}canvas{display:block}</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+/*
+ * "Living painting" renderer for the gallery demos. Each preset is a WebGL
+ * fragment shader that animates the artwork itself, so the video lines up
+ * with the printed artwork (the AR overlay replaces the print exactly).
+ * Every effect is periodic in LOOP seconds (phase `ph` = 0..2π), so videos
+ * loop seamlessly. Used headless: loadArt(preset, imageUrl), then
+ * renderFrame(t) returns a PNG data URL (see render script in the README).
+ */
+const LOOP = 8;
+const COMMON = `
+precision highp float;
+varying vec2 uv;
+uniform sampler2D art;
+uniform float ph;
+uniform vec2 res;
+const float PI = 3.14159265;
+float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float lum(vec3 c){ return dot(c, vec3(0.299, 0.587, 0.114)); }
+float sat(vec3 c){ float mx = max(c.r, max(c.g, c.b)); float mn = min(c.r, min(c.g, c.b)); return mx > 0.0 ? (mx - mn) / mx : 0.0; }
+vec3 screen(vec3 a, vec3 b){ return 1.0 - (1.0 - a) * (1.0 - b); }
+vec2 rot(vec2 p, float a){ float c = cos(a), s = sin(a); return vec2(c * p.x - s * p.y, s * p.x + c * p.y); }
+`;
+
+const PRESETS = {
+  // Haeckel, Discomedusae: the paper becomes the deep sea, bells pulse and
+  // glow, tentacles undulate, light rays and glowing plankton drift past.
+  haeckel: { width: 760, height: 1090, fs: `
+const int NB = 4;
+vec4 bell(int i){
+  if (i == 0) return vec4(0.74, 0.11, 0.17, 0.0);
+  if (i == 1) return vec4(0.22, 0.09, 0.13, 1.7);
+  if (i == 2) return vec4(0.83, 0.47, 0.14, 3.1);
+  return vec4(0.40, 0.68, 0.17, 4.4);
+}
+vec3 bellColor(int i){
+  if (i == 0) return vec3(0.25, 0.75, 1.0);
+  if (i == 1) return vec3(1.0, 0.45, 0.8);
+  if (i == 2) return vec3(1.0, 0.75, 0.25);
+  return vec3(0.4, 0.9, 1.0);
+}
+void main(){
+  float aspect = res.x / res.y;
+  vec2 q = uv;
+  vec3 halo = vec3(0.0);
+  float glowIn = 0.0;
+  for (int i = 0; i < NB; i++) {
+    vec4 b = bell(i);
+    vec2 d = q - b.xy; d.x *= aspect;
+    float r = length(d) / b.z;
+    float pulse = sin(ph * 2.0 + b.w);
+    float w = exp(-r * r * 1.4);
+    q -= (q - b.xy) * w * 0.06 * pulse;                       // strong contraction
+    float beat = 0.5 + 0.5 * pulse;
+    glowIn += w * beat;
+    halo += bellColor(i) * exp(-r * r * 0.45) * (0.25 + 0.55 * beat);   // glow spills into the water
+    // expanding ring of light on every beat
+    float ring = fract(ph / PI + b.w / (2.0 * PI));
+    halo += bellColor(i) * 0.6 * exp(-pow((r - ring * 2.2) * 6.0, 2.0)) * (1.0 - ring);
+  }
+  // Tentacles: waves travelling down, growing with distance from the bells.
+  float down = smoothstep(0.1, 0.95, uv.y);
+  q.x += sin(uv.y * 16.0 - ph * 2.0 + uv.x * 3.0) * 0.012 * down;
+  q.y += cos(uv.x * 11.0 - ph + uv.y * 4.0) * 0.004 * down;
+  vec3 a = texture2D(art, q).rgb;
+  float ink = smoothstep(0.93, 0.72, lum(a));
+  // Deep-sea water with light rays from the surface and moving caustics.
+  vec3 water = mix(vec3(0.01, 0.05, 0.13), vec3(0.03, 0.22, 0.38), pow(1.0 - uv.y, 1.5));
+  float ang = (uv.x - 0.5) * 3.0 / (uv.y + 0.6);
+  float rays = pow(0.5 + 0.5 * sin(ang * 9.0 + sin(ang * 3.0 + ph) * 1.5 + ph), 6.0) * (1.0 - uv.y) * 0.35;
+  vec2 k = uv * vec2(aspect, 1.0) * 8.0;
+  float caus = pow(abs(sin(k.x + sin(k.y * 0.8 + ph) * 1.6) * sin(k.y * 1.1 + sin(k.x * 0.7 - ph) * 1.6)), 5.0);
+  water += vec3(0.3, 0.6, 0.8) * (rays + caus * 0.12);
+  vec3 c = mix(water + halo * 0.55, a * (1.0 + glowIn * 0.6) + halo * 0.25, ink);
+  // Glowing plankton and bubbles rising (2 layers, whole cycles per loop).
+  for (int layer = 0; layer < 2; layer++) {
+    float n = layer == 0 ? 22.0 : 12.0;
+    float speed = layer == 0 ? 2.0 : 1.0;
+    vec2 g = vec2(uv.x * n * aspect + sin(uv.y * 6.0 + ph) * 0.3, uv.y * n + ph / (2.0 * PI) * speed * n);
+    vec2 cell = floor(g);
+    vec2 f = fract(g) - 0.5;
+    float h = hash(cell + float(layer) * 31.0);
+    if (h > 0.72) {
+      vec2 o = vec2(hash(cell + 3.1) - 0.5, hash(cell + 7.7) - 0.5) * 0.5;
+      float dd = length(f - o);
+      float tw = 0.55 + 0.45 * sin(ph * 3.0 + h * 60.0);
+      float core = smoothstep(layer == 0 ? 0.07 : 0.11, 0.0, dd);
+      float glow = exp(-dd * dd * 60.0) * 0.6;
+      c += vec3(0.45, 0.9, 1.0) * (core + glow) * tw * (layer == 0 ? 0.8 : 1.0);
+    }
+  }
+  vec2 v = uv - 0.5;
+  c *= 1.0 - dot(v, v) * 0.6;
+  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}` },
+
+  // Klimt, The Kiss: the gold leaf glitters and shimmers, a bright sheen
+  // sweeps across it, golden dust rises and the flower meadow sways.
+  kiss: { width: 1000, height: 1004, fs: `
+void main(){
+  float aspect = res.x / res.y;
+  vec2 q = uv;
+  float meadow = smoothstep(0.62, 0.85, uv.y);
+  q.x += sin(uv.y * 40.0 + ph * 2.0 + uv.x * 10.0) * 0.003 * meadow;
+  q.y += sin(uv.x * 30.0 - ph * 2.0) * 0.002 * meadow;
+  vec3 a = texture2D(art, q).rgb;
+  // Gold leaf: warm, saturated, bright.
+  float gold = smoothstep(0.08, 0.25, (a.r + a.g) * 0.5 - a.b) * smoothstep(0.25, 0.5, lum(a));
+  // Shimmer: slow travelling brightness waves over the gold.
+  float shim = 0.5 + 0.5 * sin(uv.x * 14.0 + uv.y * 9.0 - ph * 2.0) * sin(uv.y * 11.0 - uv.x * 5.0 + ph);
+  vec3 c = a * (1.0 + gold * (0.18 + 0.35 * shim));
+  // Bright sheen sweeping diagonally, twice per loop.
+  float s = fract(ph / PI);
+  float sweep = exp(-pow((uv.x * 0.8 + uv.y * 0.6 - (s * 2.4 - 0.4)) * 6.0, 2.0));
+  c += vec3(1.0, 0.85, 0.45) * sweep * gold * 0.75;
+  // Glitter: tiny four-point stars twinkling on the gold.
+  vec2 g = uv * vec2(aspect, 1.0) * 42.0;
+  vec2 cell = floor(g);
+  vec2 f = fract(g) - 0.5;
+  float h = hash(cell);
+  if (h > 0.55) {
+    vec2 o = vec2(hash(cell + 1.3) - 0.5, hash(cell + 4.1) - 0.5) * 0.4;
+    vec2 p = f - o;
+    float tw = pow(0.5 + 0.5 * sin(ph * (2.0 + floor(h * 3.0)) + h * 80.0), 12.0);
+    float star = exp(-length(p) * 14.0) + exp(-abs(p.x) * 45.0 - abs(p.y) * 5.0) * 0.8 + exp(-abs(p.y) * 45.0 - abs(p.x) * 5.0) * 0.8;
+    vec2 gq = (cell + 0.5 + o) / vec2(aspect, 1.0) / 42.0;
+    float onGold = smoothstep(0.08, 0.25, (texture2D(art, gq).r + texture2D(art, gq).g) * 0.5 - texture2D(art, gq).b);
+    c += vec3(1.0, 0.96, 0.75) * star * tw * onGold * 2.2;
+  }
+  // Flowers in the meadow pulse with colour.
+  float flowers = smoothstep(0.35, 0.6, sat(a)) * meadow;
+  c = mix(c, c * (1.15 + 0.25 * sin(ph * 2.0 + uv.x * 20.0)), flowers);
+  // Golden dust rising, soft bokeh.
+  for (int layer = 0; layer < 2; layer++) {
+    float n = layer == 0 ? 18.0 : 9.0;
+    vec2 g2 = vec2(uv.x * n * aspect + sin(uv.y * 5.0 + ph + float(layer)) * 0.4, uv.y * n + ph / (2.0 * PI) * n * (layer == 0 ? 1.0 : 2.0));
+    vec2 c2 = floor(g2);
+    vec2 f2 = fract(g2) - 0.5;
+    float h2 = hash(c2 + float(layer) * 9.0);
+    if (h2 > 0.7) {
+      vec2 o2 = vec2(hash(c2 + 2.2) - 0.5, hash(c2 + 5.5) - 0.5) * 0.5;
+      float dd = length(f2 - o2);
+      float tw = 0.6 + 0.4 * sin(ph * 2.0 + h2 * 40.0);
+      c = screen(c, vec3(1.0, 0.8, 0.35) * (smoothstep(0.16, 0.05, dd) * 0.55 + exp(-dd * dd * 30.0) * 0.25) * tw);
+    }
+  }
+  vec2 v = uv - 0.5;
+  c *= 1.0 - dot(v, v) * 0.35;
+  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}` },
+
+  // Van Gogh, Almond Blossoms: branches sway in the wind, the brushstroke
+  // sky flows, blossoms glow and petals drift down across the canvas.
+  almond: { width: 1100, height: 868, fs: `
+void main(){
+  float aspect = res.x / res.y;
+  vec2 q = uv;
+  // Wind: branches are anchored near the bottom right; sway grows with distance.
+  float reach = clamp(length((uv - vec2(0.78, 1.05)) * vec2(aspect, 1.0)) / 1.3, 0.0, 1.0);
+  q.x += sin(ph * 2.0 + uv.x * 3.0 + uv.y * 2.0) * 0.010 * reach * reach;
+  q.y += cos(ph * 2.0 + uv.x * 2.5) * 0.006 * reach * reach;
+  vec3 a = texture2D(art, q).rgb;
+  // Sky: blue brushstrokes flow and shimmer.
+  float sky = smoothstep(0.02, 0.12, a.b - a.r) * smoothstep(0.3, 0.6, lum(a));
+  vec2 flow = vec2(sin(uv.y * 30.0 + ph * 2.0 + uv.x * 8.0), cos(uv.x * 26.0 - ph * 2.0 + uv.y * 6.0)) * 0.004;
+  vec3 skyCol = texture2D(art, q + flow).rgb;
+  a = mix(a, skyCol * (1.0 + 0.10 * sin(uv.x * 18.0 - uv.y * 12.0 + ph * 2.0)), sky);
+  // Blossoms: bright, low-saturation petals glow and pulse.
+  float blossom = smoothstep(0.72, 0.88, lum(a)) * (1.0 - smoothstep(0.25, 0.45, sat(a)));
+  vec3 bloom = vec3(0.0);
+  for (int i = 0; i < 8; i++) {
+    float an = float(i) / 8.0 * 2.0 * PI;
+    vec2 o = vec2(cos(an), sin(an)) * vec2(1.0 / aspect, 1.0) * 0.012;
+    vec3 s = texture2D(art, q + o).rgb;
+    bloom += smoothstep(0.72, 0.9, lum(s)) * vec3(1.0, 0.92, 0.95);
+  }
+  bloom /= 8.0;
+  float beat = 0.5 + 0.5 * sin(ph * 2.0 + uv.x * 6.0 + uv.y * 4.0);
+  vec3 c = a + blossom * 0.18 * beat + bloom * (0.25 + 0.35 * beat);
+  // Falling petals: soft white-pink ellipses tumbling down (whole cycles per loop).
+  for (int layer = 0; layer < 2; layer++) {
+    float n = layer == 0 ? 9.0 : 6.0;
+    float fall = layer == 0 ? 1.0 : 2.0;
+    vec2 g = vec2(uv.x * n * aspect + sin(ph + uv.y * 3.0 + float(layer) * 2.0) * 0.6, uv.y * n - ph / (2.0 * PI) * n * fall);
+    vec2 cell = floor(g);
+    vec2 f = fract(g) - 0.5;
+    float h = hash(cell + float(layer) * 13.0);
+    if (h > 0.6) {
+      vec2 o = vec2(hash(cell + 1.7) - 0.5, hash(cell + 6.3) - 0.5) * 0.45;
+      vec2 p = rot(f - o, ph * (1.0 + floor(h * 3.0)) + h * 20.0);
+      float size = layer == 0 ? 0.12 : 0.17;
+      float petal = smoothstep(1.0, 0.6, length(p / vec2(size, size * 0.55)));
+      vec3 pc = mix(vec3(1.0, 0.97, 0.95), vec3(1.0, 0.82, 0.88), hash(cell + 9.9));
+      float shade = 0.85 + 0.15 * sin(ph * 2.0 + h * 30.0);
+      c = mix(c, pc * shade, petal * 0.92);
+    }
+  }
+  // Warm sunlight drifting across once per loop.
+  float s = fract(ph / (2.0 * PI));
+  c += vec3(1.0, 0.9, 0.7) * exp(-pow((uv.x - (s * 1.6 - 0.3)) * 3.0, 2.0)) * 0.08;
+  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);
+}` },
+};
+
+const canvas = document.getElementById('c');
+const gl = canvas.getContext('webgl', { preserveDrawingBuffer: true });
+let prog = null;
+function compile(type, src) {
+  const s = gl.createShader(type);
+  gl.shaderSource(s, src);
+  gl.compileShader(s);
+  if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+  return s;
+}
+window.loadArt = (preset, src) =>
+  new Promise((resolve, reject) => {
+    const P = PRESETS[preset];
+    canvas.width = P.width;
+    canvas.height = P.height;
+    gl.viewport(0, 0, P.width, P.height);
+    prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, 'attribute vec2 p; varying vec2 uv; void main(){ uv = p*0.5+0.5; uv.y = 1.0-uv.y; gl_Position = vec4(p,0.,1.); }'));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, COMMON + P.fs));
+    gl.linkProgram(prog);
+    gl.useProgram(prog);
+    const buf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+    const loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const img = new Image();
+    img.onerror = reject;
+    img.onload = () => {
+      const tex = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.uniform1i(gl.getUniformLocation(prog, 'art'), 0);
+      gl.uniform2f(gl.getUniformLocation(prog, 'res'), P.width, P.height);
+      resolve();
+    };
+    img.src = src;
+  });
+window.renderFrame = (t) => {
+  gl.uniform1f(gl.getUniformLocation(prog, 'ph'), (t / LOOP) * Math.PI * 2);
+  gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  return canvas.toDataURL('image/png');
+};
+</script>
+</body>
+</html>
