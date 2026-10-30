@@ -177,15 +177,53 @@ export class EighthWallSession {
     });
   }
 
+  /**
+   * Size the canvas the way 8th Wall expects (port of its XRExtras
+   * FullWindowCanvas module, for our container): the drawing buffer has the
+   * screen's aspect ratio and at most the camera's resolution, i.e. the
+   * cropped camera frame. A larger or differently shaped buffer makes the
+   * engine stretch the camera image.
+   */
   #sizeCanvas() {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    this.canvas.width = Math.round(this.container.clientWidth * dpr);
-    this.canvas.height = Math.round(this.container.clientHeight * dpr);
+    const canvas = this.canvas;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const ww = this.container.clientWidth * dpr;
+    const wh = this.container.clientHeight * dpr;
+    if (!ww || !wh) return;
+    const ph = Math.max(ww, wh);
+    const pw = Math.min(ww, wh);
+    const pa = ph / pw;
+    const v = this._video ?? { w: 0, h: 0 };
+    const pvh = Math.max(v.w, v.h) || ph;
+    const pvw = Math.min(v.w, v.h) || pw;
+    let ch = pvh;
+    let cw = Math.round(pvh / pa);
+    if (cw > pvw) {
+      cw = pvw;
+      ch = Math.round(pvw * pa);
+    }
+    if (cw > pw || ch > ph) {
+      cw = Math.round(pw);
+      ch = Math.round(ph);
+    }
+    if (ww > wh) [cw, ch] = [ch, cw];
+    Object.assign(canvas.style, { width: '100%', height: '100%', display: 'block' });
+    if (canvas.width !== cw) canvas.width = cw;
+    if (canvas.height !== ch) canvas.height = ch;
   }
 
   #pipelineModule() {
+    const setVideo = (w, h) => {
+      if (w && h) this._video = { w, h };
+      this.#sizeCanvas();
+    };
     return {
       name: 'webar-session',
+      onAttach: ({ videoWidth, videoHeight }) => setVideo(videoWidth, videoHeight),
+      onVideoSizeChange: ({ videoWidth, videoHeight }) => setVideo(videoWidth, videoHeight),
+      onDeviceOrientationChange: () => this.#sizeCanvas(),
+      onCanvasSizeChange: () => this.#sizeCanvas(),
       onStart: () => {
         const { scene, camera, renderer } = this.XR8.Threejs.xrScene();
         this.scene = scene;
@@ -196,7 +234,8 @@ export class EighthWallSession {
         this.clock.start();
         this._resolveStart?.();
       },
-      onCameraStatusChange: ({ status }) => {
+      onCameraStatusChange: ({ status, video }) => {
+        if (status === 'hasVideo' && video) setVideo(video.videoWidth, video.videoHeight);
         if (status === 'failed') this._rejectStart?.(new ARError('camera-denied', 'Camera access was denied or is unavailable.'));
       },
       onException: (err) => this._rejectStart?.(classifyCameraError(err)),
@@ -283,8 +322,12 @@ export class EighthWallSession {
   #placeFullscreen() {
     const cam = this.camera;
     if (!cam) return;
-    const tanHalf = Math.tan(THREE.MathUtils.degToRad(cam.fov) / 2);
-    const dist = Math.max(1 / (2 * tanHalf * cam.aspect), this.targetAspect / (2 * tanHalf)) * 1.08;
+    // The engine sets the projection matrix directly (camera intrinsics), so
+    // derive the visible extent from it rather than from cam.fov / cam.aspect.
+    const e = cam.projectionMatrix.elements;
+    const tanH = 1 / e[0];
+    const tanV = 1 / e[5];
+    const dist = Math.max(0.5 / tanH, (this.targetAspect * 0.5) / tanV) * 1.08;
     cam.updateMatrixWorld();
     this.anchor.matrix.copy(cam.matrixWorld).multiply(this._local.makeTranslation(0, 0, -dist));
     this.anchor.matrixWorldNeedsUpdate = true;
