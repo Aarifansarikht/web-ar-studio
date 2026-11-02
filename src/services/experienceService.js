@@ -6,7 +6,7 @@ import { ApiError, apiRequest, apiUpload } from './apiClient.js';
  * {
  *   id, name, description, status: 'draft' | 'published',
  *   brand:     { name, accentColor, logoUrl, coverUrl },   // coverUrl: optional splash hero image
- *   target:    { imageUrl, mindUrl, width, height, quality, featureCount },
+ *   target:    { imageUrl, width, height },
  *   content:   { type: 'video' | 'image' | 'model', url, fileName, fit, loop, startMuted, playAnimations, aspect },
  *   placement: { scale, offsetX, offsetY, offsetZ, rotationX, rotationY, rotationZ },
  *   hotspots:  [{ id, label, x, y, z }], // x/y normalised from the target's top-left; z = height in target widths
@@ -36,7 +36,7 @@ export function createEmptyDraft() {
     description: '',
     status: 'published',
     brand: { name: '', accentColor: '#e5173f', logoUrl: null, coverUrl: null, removeLogo: false, removeCover: false },
-    target: { imageUrl: null, mindUrl: null, width: 0, height: 0, quality: null, featureCount: 0 },
+    target: { imageUrl: null, width: 0, height: 0 },
     content: {
       type: 'video',
       url: null,
@@ -148,7 +148,6 @@ function buildFormData(draft, files) {
   const fd = new FormData();
   fd.append('data', JSON.stringify(draft));
   if (files.targetImage) fd.append('targetImage', files.targetImage);
-  if (files.targetMind) fd.append('targetMind', files.targetMind, 'target.mind');
   if (files.content) fd.append('content', files.content);
   if (files.logo) fd.append('logo', files.logo);
   if (files.cover) fd.append('cover', files.cover);
@@ -157,7 +156,7 @@ function buildFormData(draft, files) {
 
 /**
  * @param {object} draft Experience fields (see data model).
- * @param {{targetImage?: File, targetMind?: Blob, content?: File, logo?: File, cover?: File}} files
+ * @param {{targetImage?: File, content?: File, logo?: File, cover?: File}} files
  */
 export async function createExperience(draft, files, onProgress) {
   if ((await getDataSource()) === 'static') return readOnly();

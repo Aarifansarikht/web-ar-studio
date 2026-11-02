@@ -33,7 +33,7 @@ fs.mkdirSync(path.join(OUT_DATA, 'experiences'), { recursive: true });
 
 let bytes = 0;
 for (const exp of published) {
-  const urls = [exp.target.imageUrl, exp.target.mindUrl, exp.content.url, exp.brand?.logoUrl, exp.brand?.coverUrl];
+  const urls = [exp.target.imageUrl, exp.content.url, exp.brand?.logoUrl, exp.brand?.coverUrl];
   for (const url of urls.filter(Boolean)) {
     const rel = url.replace(/^\/uploads\//, '');
     const src = path.join(DATA_DIR, 'uploads', rel);

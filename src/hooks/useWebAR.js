@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { ImageTrackingSession } from '../ar/ImageTrackingSession.js';
 import { EighthWallSession } from '../ar/EighthWallSession.js';
 import { assetUrl } from '../utils/url.js';
 import { ARError, detectARSupportIssue } from '../ar/environment.js';
@@ -12,8 +11,7 @@ import { requestMotionAccess } from '../ar/GyroTracker.js';
 /**
  * Lifecycle of one image-tracked AR session over one or more artworks.
  *
- * `experiences[i]` is recognised by target i of `assets.mindBuffer` (a single
- * experience, or a gallery whose compiled targets were merged in that order).
+ * `experiences[i]` is recognised by its 8th Wall image target.
  * Whichever artwork is in view shows its own content; the others stay hidden.
  *
  * status: 'idle' | 'starting' | 'scanning' | 'tracking' | 'searching' | 'error'
@@ -26,7 +24,7 @@ import { requestMotionAccess } from '../ar/GyroTracker.js';
  * `stop()` and unmount release the camera, the tracking worker, the WebGL
  * context and all content resources.
  */
-export function useWebAR({ containerRef, experiences, assets, engine = 'mindar' }) {
+export function useWebAR({ containerRef, experiences, assets }) {
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState(null);
   const [videoBlocked, setVideoBlocked] = useState(false);
@@ -107,10 +105,8 @@ export function useWebAR({ containerRef, experiences, assets, engine = 'mindar' 
       if (runtime.current === rt) setVideoBlocked(blocked);
     };
 
-    const Session = engine === '8w' ? EighthWallSession : ImageTrackingSession;
-    const session = new Session({
+    const session = new EighthWallSession({
       container,
-      mindBuffer: assets.mindBuffer,
       targets: experiences.map((e) => ({ id: e.id, url: assetUrl(e.target.imageUrl) })),
       onTrackingChange: ({ type, targetIndex }) => {
         if (runtime.current !== rt) return;
@@ -230,7 +226,7 @@ export function useWebAR({ containerRef, experiences, assets, engine = 'mindar' 
     } finally {
       startingRef.current = false;
     }
-  }, [containerRef, experiences, assets, engine, teardown]);
+  }, [containerRef, experiences, assets, teardown]);
 
   const activeVideo = () => {
     const rt = runtime.current;
@@ -271,13 +267,13 @@ export function useWebAR({ containerRef, experiences, assets, engine = 'mindar' 
     }
   }, []);
 
-  // Diagnostics overlay (?debug in the URL): tracker frame rate.
+  // FPS is always visible during a session; detailed diagnostics remain opt-in.
   useEffect(() => {
-    if (!new URLSearchParams(window.location.search).has('debug')) return undefined;
+    const debug = new URLSearchParams(window.location.search).has('debug');
     const t = setInterval(() => {
       const s = runtime.current?.session;
-      setStats(s ? { ...s.stats, tracking: s.isTracking } : null);
-    }, 500);
+      setStats(s ? { ...(debug ? s.stats : { fps: s.stats.fps }), tracking: s.isTracking } : null);
+    }, 250);
     return () => clearInterval(t);
   }, []);
 

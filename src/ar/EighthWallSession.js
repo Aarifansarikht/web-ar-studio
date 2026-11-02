@@ -3,8 +3,8 @@ import { ARError, classifyCameraError } from './environment.js';
 
 /**
  * Image tracking with the 8th Wall engine (free since 2026; binary in
- * public/external/xr, see README "8th Wall engine"). Same interface as
- * ImageTrackingSession, so content, hotspots and the gallery work unchanged:
+ * public/external/xr, see README "8th Wall engine"). Content, hotspots and
+ * the gallery all use this session directly:
  * content added to `session.anchor` is in target space (origin at the image
  * centre, +X right, +Y up, +Z towards the viewer, 1 unit = image width).
  *
@@ -43,7 +43,10 @@ export function loadEighthWall() {
   return enginePromise;
 }
 
-/** 8th Wall image-target data for an image (3:4 crop, rotated to portrait if landscape). */
+/**
+ * Build 3:4 crops for one artwork. 8th Wall tracks 3:4 planar inputs; three
+ * overlapping crops cover the outer details and every corner of the image.
+ */
 async function buildTargetData(name, url) {
   const img = await new Promise((resolve, reject) => {
     const i = new Image();
@@ -57,41 +60,42 @@ async function buildTargetData(name, url) {
   const isRotated = W > H;
   const rw = isRotated ? H : W; // portrait frame
   const rh = isRotated ? W : H;
-  let width = rw;
-  let height = Math.round((rw * 4) / 3);
-  let left = 0;
-  let top = Math.round((rh - height) / 2);
-  if (height > rh) {
-    height = rh;
-    width = Math.round((rh * 3) / 4);
-    top = 0;
-    left = Math.round((rw - width) / 2);
-  }
-  const canvas = document.createElement('canvas');
-  [canvas.width, canvas.height] = LUMINANCE;
-  const g = canvas.getContext('2d');
-  g.filter = 'grayscale(1)';
-  g.scale(LUMINANCE[0] / width, LUMINANCE[1] / height);
-  g.translate(-left, -top);
-  if (isRotated) {
-    g.translate(rw, 0);
-    g.rotate(Math.PI / 2);
-  }
-  g.drawImage(img, 0, 0);
-  return {
-    data: {
-      imagePath: canvas.toDataURL('image/jpeg', 0.92),
-      metadata: null,
-      name,
-      type: 'PLANAR',
-      properties: { left, top, width, height, isRotated, originalWidth: rw, originalHeight: rh },
-      resources: {},
-      created: 0,
-      updated: 0,
-    },
-    // How the tracked crop relates to the full image (for the anchor transform).
-    geometry: { W, H, isRotated, crop: { left, top, width, height }, rw },
-  };
+  const tall = rw / rh <= 3 / 4;
+  const width = tall ? rw : Math.round((rh * 3) / 4);
+  const height = tall ? Math.round((rw * 4) / 3) : rh;
+  const span = Math.max(0, tall ? rh - height : rw - width);
+  // Start, centre and end cover every corner without multiplying gallery
+  // tracking work more than necessary.
+  const offsets = [...new Set([0, Math.round(span / 2), span])];
+
+  return offsets.map((offset, variant) => {
+    const left = tall ? 0 : offset;
+    const top = tall ? offset : 0;
+    const canvas = document.createElement('canvas');
+    [canvas.width, canvas.height] = LUMINANCE;
+    const g = canvas.getContext('2d');
+    g.filter = 'grayscale(1)';
+    g.scale(LUMINANCE[0] / width, LUMINANCE[1] / height);
+    g.translate(-left, -top);
+    if (isRotated) {
+      g.translate(rw, 0);
+      g.rotate(Math.PI / 2);
+    }
+    g.drawImage(img, 0, 0);
+    return {
+      data: {
+        imagePath: canvas.toDataURL('image/jpeg', 0.92),
+        metadata: null,
+        name: `${name}--${variant}`,
+        type: 'PLANAR',
+        properties: { left, top, width, height, isRotated, originalWidth: rw, originalHeight: rh },
+        resources: {},
+        created: 0,
+        updated: 0,
+      },
+      geometry: { W, H, isRotated, crop: { left, top, width, height }, rw },
+    };
+  });
 }
 
 export class EighthWallSession {
@@ -120,11 +124,13 @@ export class EighthWallSession {
     this.displayTarget = -1;
     this.stopped = false;
     this.clock = new THREE.Clock(false);
-    this.stats = { engine: '8th Wall', trackFps: 0, tracking: false, target: -1 };
+    this.stats = { engine: '8th Wall', fps: 0, trackFps: 0, tracking: false, target: -1 };
     this._updates = 0;
+    this._frames = 0;
     this._statsAt = 0;
     this._m = new THREE.Matrix4();
     this._local = new THREE.Matrix4();
+    this._visibleTargetVariants = new Set();
   }
 
   get isTracking() {
@@ -141,9 +147,9 @@ export class EighthWallSession {
 
   async start() {
     let XR8;
-    let built;
+    let targetVariants;
     try {
-      [XR8, built] = await Promise.all([
+      [XR8, targetVariants] = await Promise.all([
         loadEighthWall(),
         Promise.all(this.targetSources.map((t) => buildTargetData(t.id, t.url))),
       ]);
@@ -152,8 +158,14 @@ export class EighthWallSession {
     }
     if (this.stopped) return;
     this.XR8 = XR8;
-    this.targets = built.map((b) => ({ aspect: b.geometry.H / b.geometry.W, ...b.geometry }));
-    this._nameToIndex = new Map(this.targetSources.map((t, i) => [t.id, i]));
+    this.targets = targetVariants.map((variants) => ({
+      aspect: variants[0].geometry.H / variants[0].geometry.W,
+      ...variants[0].geometry,
+    }));
+    const built = targetVariants.flatMap((variants, targetIndex) =>
+      variants.map((target) => ({ ...target, targetIndex })),
+    );
+    this._nameToTarget = new Map(built.map((target) => [target.data.name, target]));
 
     const canvas = document.createElement('canvas');
     Object.assign(canvas.style, { position: 'absolute', inset: '0', width: '100%', height: '100%', zIndex: '1', touchAction: 'none' });
@@ -241,12 +253,15 @@ export class EighthWallSession {
       onException: (err) => this._rejectStart?.(classifyCameraError(err)),
       onUpdate: () => {
         const dt = Math.min(this.clock.getDelta(), 0.1);
+        this._frames++;
         if (this.fullscreen) this.#placeFullscreen();
         if (this.clock.elapsedTime - this._statsAt >= 1) {
           this.stats.trackFps = Math.round(this._updates / (this.clock.elapsedTime - this._statsAt));
+          this.stats.fps = Math.round(this._frames / (this.clock.elapsedTime - this._statsAt));
           this.stats.tracking = this.tracking;
           this.stats.target = this.displayTarget;
           this._updates = 0;
+          this._frames = 0;
           this._statsAt = this.clock.elapsedTime;
         }
         this.onFrame?.(dt, this.clock.elapsedTime);
@@ -261,10 +276,11 @@ export class EighthWallSession {
 
   /** Anchor = engine pose of the tracked crop × (crop → full-image target space). */
   #onImage(detail, found) {
-    const i = this._nameToIndex.get(detail.name);
-    if (i === undefined) return;
+    const tracked = this._nameToTarget.get(detail.name);
+    if (!tracked) return;
+    const { targetIndex: i, geometry: t } = tracked;
     this._updates++;
-    const t = this.targets[i];
+    this._visibleTargetVariants.add(detail.name);
     // Units per image pixel in the engine's image frame (reported in the
     // image's own orientation: width = scaledWidth).
     const cropAlongX = t.isRotated ? t.crop.height : t.crop.width;
@@ -304,8 +320,15 @@ export class EighthWallSession {
   }
 
   #onLost(detail) {
-    const i = this._nameToIndex.get(detail.name);
-    if (i !== this.activeTarget) return;
+    const tracked = this._nameToTarget.get(detail.name);
+    if (!tracked) return;
+    this._visibleTargetVariants.delete(detail.name);
+    if (tracked.targetIndex !== this.activeTarget) return;
+    const i = tracked.targetIndex;
+    const anotherVariantIsVisible = [...this._visibleTargetVariants].some(
+      (name) => this._nameToTarget.get(name)?.targetIndex === i,
+    );
+    if (anotherVariantIsVisible) return;
     this.tracking = false;
     if (!this.fullscreen) this.anchor.visible = false;
     this.onTrackingChange?.({ type: 'searching', targetIndex: i });

@@ -113,7 +113,7 @@ const upload = multer({
   }),
   limits: { fileSize: MAX_UPLOAD_MB * 1024 * 1024, files: 5, fields: 4, fieldSize: 256 * 1024 },
   fileFilter(req, file, cb) {
-    const allowed = ['targetImage', 'targetMind', 'content', 'logo', 'cover'];
+    const allowed = ['targetImage', 'content', 'logo', 'cover'];
     if (!allowed.includes(file.fieldname)) {
       return cb(new ValidationError(`Unexpected file field "${file.fieldname}".`));
     }
@@ -121,7 +121,6 @@ const upload = multer({
   },
 }).fields([
   { name: 'targetImage', maxCount: 1 },
-  { name: 'targetMind', maxCount: 1 },
   { name: 'content', maxCount: 1 },
   { name: 'logo', maxCount: 1 },
   { name: 'cover', maxCount: 1 },
@@ -217,15 +216,13 @@ api.post('/experiences', requireAdmin, upload, async (req, res) => {
   try {
     const clean = sanitizeExperienceInput(parseData(req.body.data));
     const targetImage = one(files, 'targetImage');
-    const targetMind = one(files, 'targetMind');
     const content = one(files, 'content');
-    if (!targetImage || !targetMind) {
-      throw new ValidationError('A target image and its compiled tracking data are required.');
+    if (!targetImage) {
+      throw new ValidationError('A target image is required.');
     }
     if (!content) throw new ValidationError('An AR content file is required.');
 
     clean.target.imageUrl = await commitFile(targetImage, id, 'target', FILE_RULES.targetImage);
-    clean.target.mindUrl = await commitFile(targetMind, id, 'target', FILE_RULES.targetMind);
     clean.content.url = await commitFile(content, id, 'content', FILE_RULES.content[clean.content.type]);
     clean.content.fileName = content.originalname.slice(0, 120);
     const logo = one(files, 'logo');
@@ -255,14 +252,9 @@ api.put('/experiences/:id', requireAdmin, validId, upload, async (req, res) => {
     const clean = sanitizeExperienceInput(parseData(req.body.data), previous);
 
     const targetImage = one(files, 'targetImage');
-    const targetMind = one(files, 'targetMind');
-    if (Boolean(targetImage) !== Boolean(targetMind)) {
-      throw new ValidationError('A new target image must be uploaded together with its compiled tracking data.');
-    }
     if (targetImage) {
       clean.target.imageUrl = await commitFile(targetImage, id, 'target', FILE_RULES.targetImage);
-      clean.target.mindUrl = await commitFile(targetMind, id, 'target', FILE_RULES.targetMind);
-      replaced.push(previous.target.imageUrl, previous.target.mindUrl);
+      replaced.push(previous.target.imageUrl);
     }
 
     const content = one(files, 'content');

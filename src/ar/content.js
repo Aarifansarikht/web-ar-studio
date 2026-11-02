@@ -59,7 +59,7 @@ function loadVideo(url, { loop, startMuted }) {
 
 /**
  * AR content anchored to the image target: a video plane, an image plane or a
- * glTF model. All units are relative to the target width (see ImageTrackingSession).
+ * glTF model. All units are relative to the target width.
  */
 export class ARContent {
   constructor({

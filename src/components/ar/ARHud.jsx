@@ -42,6 +42,9 @@ export default function ARHud({ experience, ar, onClose }) {
     <div className={styles.hud}>
       <header className={styles.hudTop}>
         <BrandHeader brand={experience.brand} compact />
+        <output className={styles.fps} aria-label={`Display frame rate: ${ar.stats?.fps ?? 0} frames per second`}>
+          {ar.stats?.fps ?? 0} FPS
+        </output>
         <button className={styles.iconBtn} onClick={onClose} aria-label="Close AR and turn off camera">
           <Icon name="x" size={22} />
         </button>

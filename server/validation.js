@@ -8,7 +8,6 @@ export const STATUSES = ['draft', 'published'];
 
 export const FILE_RULES = {
   targetImage: { exts: ['.jpg', '.jpeg', '.png', '.webp'], label: 'Target image' },
-  targetMind: { exts: ['.mind'], label: 'Compiled target' },
   logo: { exts: ['.jpg', '.jpeg', '.png', '.webp'], label: 'Logo' },
   cover: { exts: ['.jpg', '.jpeg', '.png', '.webp'], label: 'Splash image' },
   content: {
@@ -104,11 +103,8 @@ export function sanitizeExperienceInput(input, previous = null) {
   const t = input.target ?? {};
   const target = {
     imageUrl: previous?.target?.imageUrl ?? null,
-    mindUrl: previous?.target?.mindUrl ?? null,
     width: Math.round(num(t.width, 1, 20000, previous?.target?.width ?? 1)),
     height: Math.round(num(t.height, 1, 20000, previous?.target?.height ?? 1)),
-    quality: ['good', 'fair', 'poor'].includes(t.quality) ? t.quality : previous?.target?.quality ?? null,
-    featureCount: Math.round(num(t.featureCount, 0, 1e6, previous?.target?.featureCount ?? 0)),
   };
 
   return {

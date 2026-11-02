@@ -310,6 +310,18 @@
   right: 12px;
   top: calc(env(safe-area-inset-top) + 8px);
 }
+.fps {
+  position: absolute;
+  left: 12px;
+  top: calc(env(safe-area-inset-top) + 10px);
+  min-width: 60px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.62);
+  color: #7dffb0;
+  font: 700 12px/1 ui-monospace, monospace;
+  text-align: center;
+}
 .centerStatus {
   position: absolute;
   inset: 0;

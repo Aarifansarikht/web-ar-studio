@@ -57,7 +57,7 @@ function Section({ step, title, description, children, aside }) {
 export default function ExperienceForm({ mode, initial = null, onSaved }) {
   const toast = useToast();
   const [draft, setDraft] = useState(() => toDraft(initial));
-  const [target, setTarget] = useState(null); // freshly compiled target (this session)
+  const [target, setTarget] = useState(null); // freshly selected target (this session)
   const [contentFile, setContentFile] = useState(null);
   const [logoFile, setLogoFile] = useState(null);
   const [coverFile, setCoverFile] = useState(null);
@@ -88,8 +88,6 @@ export default function ExperienceForm({ mode, initial = null, onSaved }) {
         ...d.target,
         width: result.width,
         height: result.height,
-        quality: result.quality,
-        featureCount: result.featureCount,
       },
     }));
   };
@@ -103,7 +101,7 @@ export default function ExperienceForm({ mode, initial = null, onSaved }) {
   const validate = () => {
     const next = {};
     if (!draft.name.trim()) next.name = 'Give the experience a name.';
-    if (!target && !draft.target.mindUrl) next.target = 'Upload and compile a target image.';
+    if (!target && !draft.target.imageUrl) next.target = 'Upload a target image.';
     if (!contentFile && !savedContentMatches) next.content = 'Upload the AR content file.';
     setErrors(next);
     return Object.keys(next).length === 0;
@@ -120,7 +118,6 @@ export default function ExperienceForm({ mode, initial = null, onSaved }) {
     setUploadProgress(0);
     const files = {
       targetImage: target?.file,
-      targetMind: target?.mindBlob,
       content: contentFile,
       logo: logoFile,
       cover: coverFile,
@@ -207,7 +204,7 @@ export default function ExperienceForm({ mode, initial = null, onSaved }) {
       <Section
         step="2"
         title="Target image"
-        description="The poster, packaging or print that visitors point their camera at. It is compiled into MindAR tracking data."
+        description="The poster, packaging or print that visitors point their camera at. 8th Wall builds tracking data from this image."
       >
         <TargetImageField
           previewUrl={targetPreviewUrl}

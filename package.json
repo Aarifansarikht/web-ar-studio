@@ -16,7 +16,6 @@
     "@8thwall/engine-binary": "^1.0.0",
     "@msgpack/msgpack": "2.8.0",
     "express": "^5.3.0",
-    "mind-ar": "1.2.5",
     "multer": "^2.5.0",
     "nanoid": "^5.1.16",
     "qrcode.react": "^4.2.0",
@@ -24,11 +23,6 @@
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.5",
     "three": "^0.186.1"
-  },
-  "overrides": {
-    "mind-ar": {
-      "canvas": "npm:@favware/skip-dependency@1.2.2"
-    }
   },
   "engines": {
     "node": ">=20.19"
