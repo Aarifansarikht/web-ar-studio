@@ -19,6 +19,12 @@ const LUMINANCE = [480, 640];
 // tracking uses its own input, while this avoids a costly full-resolution draw.
 const MAX_RENDER_DIMENSION = 1280;
 const LOST_GRACE_MS = 180;
+// A centre crop showing at least this share of the image's length is enough.
+const SINGLE_CROP_COVERAGE = 0.7;
+// Pose smoothing cutoff: steady when still, no visible lag once the camera moves.
+const POSE_MIN_CUTOFF_HZ = 3;
+const POSE_SPEED_CUTOFF_HZ = 30; // added per image width per second of motion
+const POSE_SPEED_SMOOTHING_HZ = 10;
 
 let enginePromise = null;
 
@@ -48,8 +54,9 @@ export function loadEighthWall() {
 }
 
 /**
- * Build 3:4 crops for one artwork. 8th Wall tracks 3:4 planar inputs; three
- * overlapping crops cover the outer details and every corner of the image.
+ * Build 3:4 crops for one artwork. 8th Wall tracks 3:4 planar inputs, and every
+ * crop is tracked on every frame, so most images get one centre crop. Longer
+ * ones get an odd number, which keeps a crop on the centre of the image.
  */
 async function buildTargetData(name, url) {
   const img = await new Promise((resolve, reject) => {
@@ -68,9 +75,11 @@ async function buildTargetData(name, url) {
   const width = tall ? rw : Math.round((rh * 3) / 4);
   const height = tall ? Math.round((rw * 4) / 3) : rh;
   const span = Math.max(0, tall ? rh - height : rw - width);
-  // Start, centre and end cover every corner without multiplying gallery
-  // tracking work more than necessary.
-  const offsets = [...new Set([0, Math.round(span / 2), span])];
+  const cropLength = tall ? height : width;
+  const length = span + cropLength;
+  const count = cropLength / length >= SINGLE_CROP_COVERAGE ? 1 : Math.ceil(length / cropLength) | 1;
+  const offsets =
+    count === 1 ? [Math.round(span / 2)] : Array.from({ length: count }, (_, n) => Math.round((span * n) / (count - 1)));
 
   return offsets.map((offset, variant) => {
     const left = tall ? 0 : offset;
@@ -98,6 +107,7 @@ async function buildTargetData(name, url) {
         updated: 0,
       },
       geometry: { W, H, isRotated, crop: { left, top, width, height }, rw },
+      centreDistance: Math.abs(variant - (offsets.length - 1) / 2),
     };
   });
 }
@@ -138,10 +148,14 @@ export class EighthWallSession {
     this._rawPosition = new THREE.Vector3();
     this._rawRotation = new THREE.Quaternion();
     this._rawScale = new THREE.Vector3();
+    this._lastRawPosition = new THREE.Vector3();
+    this._lastRawRotation = new THREE.Quaternion();
     this._filteredPosition = new THREE.Vector3();
     this._filteredRotation = new THREE.Quaternion();
     this._filteredScale = new THREE.Vector3(1, 1, 1);
     this._poseInitialised = false;
+    this._poseSpeed = 0;
+    this._primaryVariant = null;
     this._lastPoseAt = 0;
     this._lostTimer = null;
     this._visibleTargetVariants = new Set();
@@ -208,7 +222,6 @@ export class EighthWallSession {
           antialias: false,
           preserveDrawingBuffer: false,
           powerPreference: 'high-performance',
-          desynchronized: true,
         },
       });
     });
@@ -310,8 +323,19 @@ export class EighthWallSession {
     const tracked = this._nameToTarget.get(detail.name);
     if (!tracked) return;
     const { targetIndex: i, geometry: t } = tracked;
-    this._updates++;
     this._visibleTargetVariants.add(detail.name);
+    // Crops of one image report different poses, so a single crop drives the
+    // anchor: the visible one nearest the image centre, where pose errors are
+    // magnified least. A different artwork waits until this one is lost.
+    if (detail.name !== this._primaryVariant) {
+      const primary = this._nameToTarget.get(this._primaryVariant);
+      const keepPrimary =
+        this._visibleTargetVariants.has(this._primaryVariant) &&
+        (primary.targetIndex !== i || primary.centreDistance <= tracked.centreDistance);
+      if (keepPrimary) return;
+      this._primaryVariant = detail.name;
+    }
+    this._updates++;
     if (this._lostTimer !== null) {
       clearTimeout(this._lostTimer);
       this._lostTimer = null;
@@ -350,17 +374,23 @@ export class EighthWallSession {
         this._filteredRotation.copy(this._rawRotation);
         this._filteredScale.copy(this._rawScale);
         this._poseInitialised = true;
+        this._poseSpeed = 0;
       } else {
-        // Dampen small pose noise while following a fast intentional motion
-        // closely enough that the overlay does not visibly lag behind it.
-        const distance = this._filteredPosition.distanceTo(this._rawPosition);
-        const rotation = this._filteredRotation.angleTo(this._rawRotation);
-        const dt = Math.min(100, Math.max(16, now - this._lastPoseAt));
-        const response = distance > 0.035 || rotation > 0.08 ? 0.88 : 1 - Math.exp(-dt / 85);
+        // Speed-adaptive low-pass (One Euro style) measured in image widths, so
+        // it behaves the same at any distance from the image.
+        const dt = THREE.MathUtils.clamp((now - this._lastPoseAt) / 1000, 1 / 120, 0.1);
+        const moved = this._lastRawPosition.distanceTo(this._rawPosition) / this._rawScale.x;
+        const turned = this._lastRawRotation.angleTo(this._rawRotation);
+        const speed = (moved + turned) / dt;
+        this._poseSpeed += (speed - this._poseSpeed) * (1 - Math.exp(-2 * Math.PI * POSE_SPEED_SMOOTHING_HZ * dt));
+        const cutoff = POSE_MIN_CUTOFF_HZ + POSE_SPEED_CUTOFF_HZ * this._poseSpeed;
+        const response = 1 - Math.exp(-2 * Math.PI * cutoff * dt);
         this._filteredPosition.lerp(this._rawPosition, response);
         this._filteredRotation.slerp(this._rawRotation, response);
         this._filteredScale.lerp(this._rawScale, response);
       }
+      this._lastRawPosition.copy(this._rawPosition);
+      this._lastRawRotation.copy(this._rawRotation);
       this._lastPoseAt = now;
       this.anchor.matrix.compose(this._filteredPosition, this._filteredRotation, this._filteredScale);
       this.anchor.matrixWorldNeedsUpdate = true;

@@ -123,8 +123,8 @@ NODE_ENV=production ADMIN_TOKEN=<long-random-secret> DATA_DIR=/var/lib/webar POR
 AR links (`/ar/<id>`, `/gallery`) run on the **8th Wall engine** by default. Add `?engine=mindar` to use MindAR instead; MindAR is still used to compile and grade targets in the admin. Niantic Spatial made it free in 2026; the engine binary is in `public/external/xr`, copied from the npm package `@8thwall/engine-binary`.
 
 - `src/ar/EighthWallSession.js` has the same interface as `ImageTrackingSession`, so content, hotspots, the gallery and full screen work unchanged.
-- Target data is built in the browser from each experience's target image. Up to three overlapping 3:4 crops cover the centre and outer edges, so the target can be acquired from any corner. No extra files are needed per experience.
-- The anchor maps each detected crop's pose back to full-image target space.
+- Target data is built in the browser from each experience's target image. Every crop is tracked on every frame, so a single centre 3:4 crop is used when it shows at least 70% of the image's length; longer images get an odd number of overlapping crops. With a single crop, a close-up that shows only the outer edge of the image may not be recognised. No extra files are needed per experience.
+- The anchor maps one detected crop's pose (the visible crop nearest the image centre) back to full-image target space.
 
 Measured on the same simulated feeds (average gap between the overlay and the printed edges):
 
