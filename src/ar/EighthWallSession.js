@@ -15,6 +15,10 @@ import { ARError, classifyCameraError } from './environment.js';
 
 const ENGINE_URL = '/external/xr/xr.js';
 const LUMINANCE = [480, 640];
+// Keep the camera compositor below 1280px on its longest side. Image target
+// tracking uses its own input, while this avoids a costly full-resolution draw.
+const MAX_RENDER_DIMENSION = 1280;
+const LOST_GRACE_MS = 180;
 
 let enginePromise = null;
 
@@ -130,6 +134,16 @@ export class EighthWallSession {
     this._statsAt = 0;
     this._m = new THREE.Matrix4();
     this._local = new THREE.Matrix4();
+    this._rawAnchor = new THREE.Matrix4();
+    this._rawPosition = new THREE.Vector3();
+    this._rawRotation = new THREE.Quaternion();
+    this._rawScale = new THREE.Vector3();
+    this._filteredPosition = new THREE.Vector3();
+    this._filteredRotation = new THREE.Quaternion();
+    this._filteredScale = new THREE.Vector3(1, 1, 1);
+    this._poseInitialised = false;
+    this._lastPoseAt = 0;
+    this._lostTimer = null;
     this._visibleTargetVariants = new Set();
   }
 
@@ -185,7 +199,18 @@ export class EighthWallSession {
         XR8.XrController.pipelineModule(),
         this.#pipelineModule(),
       ]);
-      XR8.run({ canvas, allowedDevices: XR8.XrConfig.device().ANY });
+      XR8.run({
+        canvas,
+        allowedDevices: XR8.XrConfig.device().ANY,
+        cameraConfig: { direction: XR8.XrConfig.camera().BACK },
+        glContextConfig: {
+          alpha: false,
+          antialias: false,
+          preserveDrawingBuffer: false,
+          powerPreference: 'high-performance',
+          desynchronized: true,
+        },
+      });
     });
   }
 
@@ -220,6 +245,12 @@ export class EighthWallSession {
       ch = Math.round(ph);
     }
     if (ww > wh) [cw, ch] = [ch, cw];
+    const longest = Math.max(cw, ch);
+    if (longest > MAX_RENDER_DIMENSION) {
+      const scale = MAX_RENDER_DIMENSION / longest;
+      cw = Math.max(1, Math.round(cw * scale));
+      ch = Math.max(1, Math.round(ch * scale));
+    }
     Object.assign(canvas.style, { width: '100%', height: '100%', display: 'block' });
     if (canvas.width !== cw) canvas.width = cw;
     if (canvas.height !== ch) canvas.height = ch;
@@ -281,6 +312,10 @@ export class EighthWallSession {
     const { targetIndex: i, geometry: t } = tracked;
     this._updates++;
     this._visibleTargetVariants.add(detail.name);
+    if (this._lostTimer !== null) {
+      clearTimeout(this._lostTimer);
+      this._lostTimer = null;
+    }
     // Units per image pixel in the engine's image frame (reported in the
     // image's own orientation: width = scaledWidth).
     const cropAlongX = t.isRotated ? t.crop.height : t.crop.width;
@@ -301,12 +336,33 @@ export class EighthWallSession {
     const w = t.W * u; // full image width in engine units
     this._local.makeScale(w, w, w).setPosition(-dx * u, dy * u, 0);
     this._m.compose(
-      new THREE.Vector3(detail.position.x, detail.position.y, detail.position.z),
-      new THREE.Quaternion(detail.rotation.x, detail.rotation.y, detail.rotation.z, detail.rotation.w),
-      new THREE.Vector3(detail.scale, detail.scale, detail.scale),
+      this._rawPosition.set(detail.position.x, detail.position.y, detail.position.z),
+      this._rawRotation.set(detail.rotation.x, detail.rotation.y, detail.rotation.z, detail.rotation.w),
+      this._rawScale.set(detail.scale, detail.scale, detail.scale),
     );
     if (!this.fullscreen) {
-      this.anchor.matrix.multiplyMatrices(this._m, this._local);
+      this._rawAnchor.multiplyMatrices(this._m, this._local);
+      this._rawAnchor.decompose(this._rawPosition, this._rawRotation, this._rawScale);
+      const now = performance.now();
+      const isNewTarget = i !== this.activeTarget || !this.tracking;
+      if (!this._poseInitialised || isNewTarget) {
+        this._filteredPosition.copy(this._rawPosition);
+        this._filteredRotation.copy(this._rawRotation);
+        this._filteredScale.copy(this._rawScale);
+        this._poseInitialised = true;
+      } else {
+        // Dampen small pose noise while following a fast intentional motion
+        // closely enough that the overlay does not visibly lag behind it.
+        const distance = this._filteredPosition.distanceTo(this._rawPosition);
+        const rotation = this._filteredRotation.angleTo(this._rawRotation);
+        const dt = Math.min(100, Math.max(16, now - this._lastPoseAt));
+        const response = distance > 0.035 || rotation > 0.08 ? 0.88 : 1 - Math.exp(-dt / 85);
+        this._filteredPosition.lerp(this._rawPosition, response);
+        this._filteredRotation.slerp(this._rawRotation, response);
+        this._filteredScale.lerp(this._rawScale, response);
+      }
+      this._lastPoseAt = now;
+      this.anchor.matrix.compose(this._filteredPosition, this._filteredRotation, this._filteredScale);
       this.anchor.matrixWorldNeedsUpdate = true;
       this.anchor.visible = true;
     }
@@ -329,9 +385,19 @@ export class EighthWallSession {
       (name) => this._nameToTarget.get(name)?.targetIndex === i,
     );
     if (anotherVariantIsVisible) return;
-    this.tracking = false;
-    if (!this.fullscreen) this.anchor.visible = false;
-    this.onTrackingChange?.({ type: 'searching', targetIndex: i });
+    if (this._lostTimer !== null) clearTimeout(this._lostTimer);
+    // A short loss is normal while a phone is shaken or the camera adjusts
+    // exposure. Keep the most recent stable pose while the next frame recovers.
+    this._lostTimer = window.setTimeout(() => {
+      this._lostTimer = null;
+      const recovered = [...this._visibleTargetVariants].some(
+        (name) => this._nameToTarget.get(name)?.targetIndex === i,
+      );
+      if (recovered || i !== this.activeTarget) return;
+      this.tracking = false;
+      if (!this.fullscreen) this.anchor.visible = false;
+      this.onTrackingChange?.({ type: 'searching', targetIndex: i });
+    }, LOST_GRACE_MS);
   }
 
   setFullscreen(on) {
@@ -369,6 +435,7 @@ export class EighthWallSession {
   async stop() {
     if (this.stopped) return;
     this.stopped = true;
+    if (this._lostTimer !== null) clearTimeout(this._lostTimer);
     window.removeEventListener('resize', this._onResize);
     const XR8 = this.XR8;
     if (XR8) {
